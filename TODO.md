@@ -1,0 +1,6 @@
+- [x] 框选section，鼠标单击确认起始点，多边形区域选择
+- [ ] 图片contrast
+- [ ] multi-channel support，支持多channel同时显示
+- [x] 支持框选区域的参数计算显示，面积，周长
+- [ ] nd2 support等（待商榷）
+- [ ] 找出多边形区域内最长的线段作为长方形的边（后续）
