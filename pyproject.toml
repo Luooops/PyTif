@@ -1,0 +1,12 @@
+[project]
+name = "pytif"
+version = "0.1.0"
+description = "A visualization app for tiff files with pyQt."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.4.3",
+    "pyside6>=6.10.2",
+    "shiboken6>=6.10.2",
+    "tifffile>=2026.3.3",
+]
