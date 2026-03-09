@@ -1,0 +1,23 @@
+name: Build Executables
+on: [push]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Install dependencies
+        run: uv sync
+      - name: Build with PyInstaller
+        run: uv run pyinstaller PyTif.spec
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PyTIF-${{ matrix.os }}
+          path: dist/

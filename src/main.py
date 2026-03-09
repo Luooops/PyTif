@@ -1,9 +1,10 @@
+import os
 import copy
 import json
 import math
-import os
 import sys
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
 
 import numpy as np
 import tifffile
@@ -59,6 +60,7 @@ SUPPORTED_EXTS = (".tif", ".tiff")
 # -------------------------
 def natural_key(s: str):
     import re
+
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", s)]
 
 
@@ -143,8 +145,13 @@ class DraggablePanel(QFrame):
 
     def eventFilter(self, obj, event):
         if obj is self._drag_handle:
-            if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
-                self._drag_offset = event.globalPosition() - self.frameGeometry().topLeft()
+            if (
+                event.type() == QEvent.MouseButtonPress
+                and event.button() == Qt.LeftButton
+            ):
+                self._drag_offset = (
+                    event.globalPosition() - self.frameGeometry().topLeft()
+                )
                 event.accept()
                 return True
             if event.type() == QEvent.MouseMove and event.buttons() & Qt.LeftButton:
@@ -159,7 +166,10 @@ class DraggablePanel(QFrame):
                 self.user_moved = True
                 event.accept()
                 return True
-            if event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+            if (
+                event.type() == QEvent.MouseButtonRelease
+                and event.button() == Qt.LeftButton
+            ):
                 event.accept()
                 return True
         return super().eventFilter(obj, event)
@@ -277,7 +287,9 @@ class ImageViewer(QGraphicsView):
         self._drag_last_scene: Optional[QPointF] = None
         self._newly_inserted_vertex = False
 
-        self.on_rois_changed: Optional[Callable[[List[Dict[str, Any]], Optional[int]], None]] = None
+        self.on_rois_changed: Optional[
+            Callable[[List[Dict[str, Any]], Optional[int]], None]
+        ] = None
         self._suppress_notify = False
 
     def set_image(self, pixmap: QPixmap, fit: bool = True):
@@ -382,7 +394,12 @@ class ImageViewer(QGraphicsView):
         self._update_roi_graphics()
 
     def set_roi_type(self, roi_type: str):
-        if roi_type not in (self.ROI_NONE, self.ROI_POLYGON, self.ROI_RECT, self.ROI_ELLIPSE):
+        if roi_type not in (
+            self.ROI_NONE,
+            self.ROI_POLYGON,
+            self.ROI_RECT,
+            self.ROI_ELLIPSE,
+        ):
             return
         self._roi_type = roi_type
         self.cancel_current_roi()
@@ -514,9 +531,17 @@ class ImageViewer(QGraphicsView):
         if typ == self.ROI_POLYGON:
             return [QPointF(float(x), float(y)) for x, y in roi.get("points", [])]
         if typ in (self.ROI_RECT, self.ROI_ELLIPSE):
-            rect = QRectF(float(roi.get("x", 0.0)), float(roi.get("y", 0.0)), float(roi.get("w", 0.0)), float(roi.get("h", 0.0))).normalized()
+            rect = QRectF(
+                float(roi.get("x", 0.0)),
+                float(roi.get("y", 0.0)),
+                float(roi.get("w", 0.0)),
+                float(roi.get("h", 0.0)),
+            ).normalized()
             return [
-                rect.topLeft(), rect.topRight(), rect.bottomRight(), rect.bottomLeft(),
+                rect.topLeft(),
+                rect.topRight(),
+                rect.bottomRight(),
+                rect.bottomLeft(),
                 QPointF(rect.center().x(), rect.top()),
                 QPointF(rect.right(), rect.center().y()),
                 QPointF(rect.center().x(), rect.bottom()),
@@ -533,7 +558,9 @@ class ImageViewer(QGraphicsView):
         self._shape_start = rect.topLeft()
         self._shape_end = rect.bottomRight()
 
-    def _point_segment_distance_scene(self, p: QPointF, a: QPointF, b: QPointF) -> float:
+    def _point_segment_distance_scene(
+        self, p: QPointF, a: QPointF, b: QPointF
+    ) -> float:
         apx = p.x() - a.x()
         apy = p.y() - a.y()
         abx = b.x() - a.x()
@@ -563,7 +590,9 @@ class ImageViewer(QGraphicsView):
             b = pts[(i + 1) % n]
             d_scene = self._point_segment_distance_scene(scene_p, a, b)
             d_view = d_scene * self.transform().m11()
-            if d_view <= self._edge_hit_threshold_px and (best_d is None or d_view < best_d):
+            if d_view <= self._edge_hit_threshold_px and (
+                best_d is None or d_view < best_d
+            ):
                 best_d = d_view
                 best_idx = i
         return best_idx
@@ -571,7 +600,11 @@ class ImageViewer(QGraphicsView):
     def _update_vertex_items(self):
         points: List[QPointF] = []
         style_type = None
-        if self._roi_mode and self._roi_type == self.ROI_POLYGON and self._drawing_points:
+        if (
+            self._roi_mode
+            and self._roi_type == self.ROI_POLYGON
+            and self._drawing_points
+        ):
             points = self._drawing_points
             style_type = self.ROI_POLYGON
         else:
@@ -591,11 +624,15 @@ class ImageViewer(QGraphicsView):
 
         for i, p in enumerate(points):
             item = self._roi_vertex_items[i]
-            is_hover = (style_type == self.ROI_POLYGON and self._hover_vertex_idx == i)
+            is_hover = style_type == self.ROI_POLYGON and self._hover_vertex_idx == i
             radius = self._vertex_radius_hover if is_hover else self._vertex_radius
             if style_type == self.ROI_POLYGON:
                 # Keep start-point visually distinct for easier closure.
-                color = QColor(0, 220, 255) if is_hover else QColor(255, 120, 0 if i == 0 else 255)
+                color = (
+                    QColor(0, 220, 255)
+                    if is_hover
+                    else QColor(255, 120, 0 if i == 0 else 255)
+                )
             else:
                 color = QColor(90, 210, 255)
             item.setRect(-radius, -radius, 2 * radius, 2 * radius)
@@ -617,7 +654,7 @@ class ImageViewer(QGraphicsView):
         for i, roi in enumerate(self._rois):
             path = self._roi_path(roi)
             item = self._roi_paths[i]
-            selected = (self._selected_idx == i)
+            selected = self._selected_idx == i
             if selected:
                 item.setPen(QPen(QColor(255, 210, 60), 2.2))
                 item.setBrush(QBrush(QColor(255, 190, 0, 60)))
@@ -626,8 +663,15 @@ class ImageViewer(QGraphicsView):
                 item.setBrush(QBrush(QColor(80, 170, 230, 30)))
             item.setPath(path)
 
-        if self._roi_mode and self._roi_type == self.ROI_POLYGON and self._drawing_points and self._drawing_hover is not None:
-            self._roi_preview.setLine(QLineF(self._drawing_points[-1], self._drawing_hover))
+        if (
+            self._roi_mode
+            and self._roi_type == self.ROI_POLYGON
+            and self._drawing_points
+            and self._drawing_hover is not None
+        ):
+            self._roi_preview.setLine(
+                QLineF(self._drawing_points[-1], self._drawing_hover)
+            )
             self._roi_preview.show()
         else:
             self._roi_preview.hide()
@@ -640,7 +684,12 @@ class ImageViewer(QGraphicsView):
         self._drawing_path.setPath(dpath)
 
         spath = QPainterPath()
-        if self._roi_mode and self._shape_drawing and self._shape_start is not None and self._shape_end is not None:
+        if (
+            self._roi_mode
+            and self._shape_drawing
+            and self._shape_start is not None
+            and self._shape_end is not None
+        ):
             rect = QRectF(self._shape_start, self._shape_end).normalized()
             if self._roi_type == self.ROI_RECT:
                 spath.addRect(rect)
@@ -661,7 +710,9 @@ class ImageViewer(QGraphicsView):
                     if self._selected_idx == hit:
                         del self._rois[hit]
                         if self._selected_idx is not None:
-                            self._selected_idx = min(hit, len(self._rois) - 1) if self._rois else None
+                            self._selected_idx = (
+                                min(hit, len(self._rois) - 1) if self._rois else None
+                            )
                         self._update_roi_graphics()
                         self._notify_rois_changed()
                     else:
@@ -672,10 +723,15 @@ class ImageViewer(QGraphicsView):
                     return
 
             if event.button() == Qt.LeftButton:
-                if self._selected_idx is not None and self._selected_idx < len(self._rois):
+                if self._selected_idx is not None and self._selected_idx < len(
+                    self._rois
+                ):
                     roi = self._rois[self._selected_idx]
                     if roi.get("type") == self.ROI_POLYGON:
-                        pts = [QPointF(float(x), float(y)) for x, y in roi.get("points", [])]
+                        pts = [
+                            QPointF(float(x), float(y))
+                            for x, y in roi.get("points", [])
+                        ]
                         idx = self._find_snap_idx(pts, mouse)
                         if idx is not None:
                             self._drag_vertex_idx = idx
@@ -721,7 +777,10 @@ class ImageViewer(QGraphicsView):
                     if not self._drawing_points:
                         self._drawing_points.append(scene_p)
                     elif snap_idx == 0 and len(self._drawing_points) >= 3:
-                        roi = {"type": self.ROI_POLYGON, "points": [(p.x(), p.y()) for p in self._drawing_points]}
+                        roi = {
+                            "type": self.ROI_POLYGON,
+                            "points": [(p.x(), p.y()) for p in self._drawing_points],
+                        }
                         self._rois.append(roi)
                         self._selected_idx = len(self._rois) - 1
                         self._drawing_points = []
@@ -749,7 +808,11 @@ class ImageViewer(QGraphicsView):
         if self._roi_mode and self._has_image:
             mouse = event.position().toPoint()
             scene_p = self._clamp_to_image(self.mapToScene(mouse))
-            if self._drag_move_roi and self._selected_idx is not None and self._drag_last_scene is not None:
+            if (
+                self._drag_move_roi
+                and self._selected_idx is not None
+                and self._drag_last_scene is not None
+            ):
                 dx = scene_p.x() - self._drag_last_scene.x()
                 dy = scene_p.y() - self._drag_last_scene.y()
                 self._move_roi_by(self._selected_idx, dx, dy)
@@ -776,7 +839,9 @@ class ImageViewer(QGraphicsView):
             if self._drawing_points:
                 snap_idx = self._find_snap_idx(self._drawing_points, mouse)
                 self._hover_vertex_idx = snap_idx
-                self._drawing_hover = self._drawing_points[snap_idx] if snap_idx is not None else scene_p
+                self._drawing_hover = (
+                    self._drawing_points[snap_idx] if snap_idx is not None else scene_p
+                )
                 self._update_roi_graphics()
                 return
         super().mouseMoveEvent(event)
@@ -801,11 +866,21 @@ class ImageViewer(QGraphicsView):
                 self._notify_rois_changed()
                 event.accept()
                 return
-            if self._shape_drawing and self._shape_start is not None and self._shape_end is not None:
+            if (
+                self._shape_drawing
+                and self._shape_start is not None
+                and self._shape_end is not None
+            ):
                 rect = QRectF(self._shape_start, self._shape_end).normalized()
                 self._shape_drawing = False
                 if rect.width() >= 1.0 and rect.height() >= 1.0:
-                    roi = {"type": self._roi_type, "x": rect.x(), "y": rect.y(), "w": rect.width(), "h": rect.height()}
+                    roi = {
+                        "type": self._roi_type,
+                        "x": rect.x(),
+                        "y": rect.y(),
+                        "w": rect.width(),
+                        "h": rect.height(),
+                    }
                     self._rois.append(roi)
                     self._selected_idx = len(self._rois) - 1
                     self._notify_rois_changed()
@@ -830,7 +905,12 @@ class ImageViewer(QGraphicsView):
         return None
 
     def _rect_from_roi(self, roi: Dict[str, Any]) -> QRectF:
-        return QRectF(float(roi.get("x", 0.0)), float(roi.get("y", 0.0)), float(roi.get("w", 0.0)), float(roi.get("h", 0.0))).normalized()
+        return QRectF(
+            float(roi.get("x", 0.0)),
+            float(roi.get("y", 0.0)),
+            float(roi.get("w", 0.0)),
+            float(roi.get("h", 0.0)),
+        ).normalized()
 
     def _hit_rect_handle(self, roi: Dict[str, Any], mouse_pos_view) -> Optional[str]:
         rect = self._rect_from_roi(roi)
@@ -848,7 +928,9 @@ class ImageViewer(QGraphicsView):
         }
         for name, hp in handles.items():
             vp = self.mapFromScene(hp)
-            d = ((vp.x() - mouse_pos_view.x()) ** 2 + (vp.y() - mouse_pos_view.y()) ** 2) ** 0.5
+            d = (
+                (vp.x() - mouse_pos_view.x()) ** 2 + (vp.y() - mouse_pos_view.y()) ** 2
+            ) ** 0.5
             if d <= self._snap_threshold_px:
                 return name
         return None
@@ -872,7 +954,9 @@ class ImageViewer(QGraphicsView):
             return
         roi = self._rois[idx]
         if roi.get("type") == self.ROI_POLYGON:
-            roi["points"] = [(float(x) + dx, float(y) + dy) for x, y in roi.get("points", [])]
+            roi["points"] = [
+                (float(x) + dx, float(y) + dy) for x, y in roi.get("points", [])
+            ]
         else:
             roi["x"] = float(roi.get("x", 0.0)) + dx
             roi["y"] = float(roi.get("y", 0.0)) + dy
@@ -943,12 +1027,12 @@ class MainWindow(QMainWindow):
         self.settings = QSettings("PyTIF", "Viewer")
 
         # Navigation state
-        self.root_folder: Optional[str] = None     # root of current browsing context
+        self.root_folder: Optional[str] = None  # root of current browsing context
         self.current_folder: Optional[str] = None  # currently displayed folder
-        self.entries: List[Tuple[str, str]] = []   # ("up"/"dir"/"tif", path)
+        self.entries: List[Tuple[str, str]] = []  # ("up"/"dir"/"tif", path)
 
         # Image state
-        self.loaded: Optional[np.ndarray] = None   # (H,W) or (S,H,W)
+        self.loaded: Optional[np.ndarray] = None  # (H,W) or (S,H,W)
         self.total_slices: int = 1
         self.current_slice: int = 0
         self.rois_by_file: Dict[str, List[Dict[str, Any]]] = {}
@@ -1128,9 +1212,15 @@ class MainWindow(QMainWindow):
         row.addWidget(self.btn_roi_poly)
         panel_layout.addLayout(row)
 
-        self.btn_roi_rect.clicked.connect(lambda: self._select_roi_type(ImageViewer.ROI_RECT))
-        self.btn_roi_ellipse.clicked.connect(lambda: self._select_roi_type(ImageViewer.ROI_ELLIPSE))
-        self.btn_roi_poly.clicked.connect(lambda: self._select_roi_type(ImageViewer.ROI_POLYGON))
+        self.btn_roi_rect.clicked.connect(
+            lambda: self._select_roi_type(ImageViewer.ROI_RECT)
+        )
+        self.btn_roi_ellipse.clicked.connect(
+            lambda: self._select_roi_type(ImageViewer.ROI_ELLIPSE)
+        )
+        self.btn_roi_poly.clicked.connect(
+            lambda: self._select_roi_type(ImageViewer.ROI_POLYGON)
+        )
 
         self.btn_clear_rois = QPushButton("Clear All ROIs")
         self.btn_clear_rois.clicked.connect(self._clear_current_file_rois)
@@ -1149,7 +1239,9 @@ class MainWindow(QMainWindow):
         elif roi_type == ImageViewer.ROI_ELLIPSE:
             p.drawEllipse(4, 5, 16, 14)
         else:
-            poly = QPolygonF([QPointF(5, 18), QPointF(8, 6), QPointF(18, 8), QPointF(19, 18)])
+            poly = QPolygonF(
+                [QPointF(5, 18), QPointF(8, 6), QPointF(18, 8), QPointF(19, 18)]
+            )
             p.drawPolygon(poly)
         p.end()
         return QIcon(pm)
@@ -1192,7 +1284,9 @@ class MainWindow(QMainWindow):
     def _build_roi_list_window(self):
         self.roi_window = ROIListWindow(self)
         self.roi_list_widget = self.roi_window.list_widget
-        self.roi_list_widget.currentRowChanged.connect(self._on_roi_list_selection_changed)
+        self.roi_list_widget.currentRowChanged.connect(
+            self._on_roi_list_selection_changed
+        )
         self.roi_list_widget.itemChanged.connect(self._on_roi_list_item_changed)
         self.roi_window.btn_save.clicked.connect(self._save_current_file_rois)
         self.roi_window.btn_load.clicked.connect(self._load_rois_into_current_file)
@@ -1290,7 +1384,12 @@ class MainWindow(QMainWindow):
 
         self.load_tiff(path)
 
-    def open_folder(self, folder: str, select_first_tif: bool = False, select_path: Optional[str] = None):
+    def open_folder(
+        self,
+        folder: str,
+        select_first_tif: bool = False,
+        select_path: Optional[str] = None,
+    ):
         folder = os.path.abspath(folder)
         self.current_folder = folder
 
@@ -1305,13 +1404,20 @@ class MainWindow(QMainWindow):
             key=natural_key,
         )
         files = sorted(
-            [n for n in names if os.path.isfile(os.path.join(folder, n)) and n.lower().endswith(SUPPORTED_EXTS)],
+            [
+                n
+                for n in names
+                if os.path.isfile(os.path.join(folder, n))
+                and n.lower().endswith(SUPPORTED_EXTS)
+            ],
             key=natural_key,
         )
 
         self.entries = []
         # Add ".." (go up) if not at root
-        if self.root_folder and os.path.abspath(folder) != os.path.abspath(self.root_folder):
+        if self.root_folder and os.path.abspath(folder) != os.path.abspath(
+            self.root_folder
+        ):
             self.entries.append(("up", os.path.dirname(folder)))
 
         for d in subdirs:
@@ -1418,7 +1524,9 @@ class MainWindow(QMainWindow):
     def _update_slice_info(self, path: str):
         name = os.path.basename(path)
         if self.total_slices > 1:
-            self.slice_info.setText(f"{name} — slice {self.current_slice + 1}/{self.total_slices}")
+            self.slice_info.setText(
+                f"{name} — slice {self.current_slice + 1}/{self.total_slices}"
+            )
         else:
             self.slice_info.setText(f"{name} — 2D")
 
@@ -1453,7 +1561,9 @@ class MainWindow(QMainWindow):
 
         self._render(fit=False)
         self._update_roi_stats()
-        self.slice_info.setText(f"{os.path.basename(self._current_tif_name())} — slice {self.current_slice + 1}/{self.total_slices}")
+        self.slice_info.setText(
+            f"{os.path.basename(self._current_tif_name())} — slice {self.current_slice + 1}/{self.total_slices}"
+        )
 
     def on_spin_changed(self, v: int):
         if self.loaded is None or self.total_slices <= 1:
@@ -1492,7 +1602,9 @@ class MainWindow(QMainWindow):
             self._show_roi_panel()
             self._show_roi_window()
             self.btn_roi.setText("ROI On")
-            self.status.setText("ROI mode: choose rectangle, ellipse, or polygon from the floating panel. Press Esc to cancel current drawing.")
+            self.status.setText(
+                "ROI mode: choose rectangle, ellipse, or polygon from the floating panel. Press Esc to cancel current drawing."
+            )
         else:
             self._hide_roi_panel()
             self._hide_roi_window()
@@ -1554,7 +1666,9 @@ class MainWindow(QMainWindow):
             ImageViewer.ROI_ELLIPSE: "Ellipse ROI",
             ImageViewer.ROI_POLYGON: "Polygon ROI",
         }
-        self.status.setText(f"ROI mode: {labels.get(roi_type, '')}. Press Esc to cancel current drawing.")
+        self.status.setText(
+            f"ROI mode: {labels.get(roi_type, '')}. Press Esc to cancel current drawing."
+        )
 
     def _current_file_path(self) -> Optional[str]:
         row = self.list_widget.currentRow()
@@ -1562,7 +1676,9 @@ class MainWindow(QMainWindow):
             return os.path.abspath(self.entries[row][1])
         return None
 
-    def _on_viewer_rois_changed(self, rois: List[Dict[str, Any]], selected_idx: Optional[int]):
+    def _on_viewer_rois_changed(
+        self, rois: List[Dict[str, Any]], selected_idx: Optional[int]
+    ):
         if self._updating_rois_from_file:
             return
         path = self._current_file_path()
@@ -1729,7 +1845,9 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.status.setText(f"Failed to save ROI file: {e}")
             return
-        self.status.setText(f"Saved {len(data_rois)} ROI(s) to {os.path.basename(save_path)}")
+        self.status.setText(
+            f"Saved {len(data_rois)} ROI(s) to {os.path.basename(save_path)}"
+        )
 
     def _load_rois_into_current_file(self):
         path = self._current_file_path()
@@ -1764,7 +1882,9 @@ class MainWindow(QMainWindow):
             if typ == ImageViewer.ROI_POLYGON:
                 pts = r.get("points", [])
                 if isinstance(pts, list) and len(pts) >= 3:
-                    rois.append({"type": typ, "points": [(float(x), float(y)) for x, y in pts]})
+                    rois.append(
+                        {"type": typ, "points": [(float(x), float(y)) for x, y in pts]}
+                    )
             elif typ in (ImageViewer.ROI_RECT, ImageViewer.ROI_ELLIPSE):
                 rois.append(
                     {
@@ -1782,7 +1902,9 @@ class MainWindow(QMainWindow):
             self.selected_roi_by_file.pop(path, None)
         self._apply_rois_for_current_file()
         self._update_roi_stats()
-        self.status.setText(f"Loaded {len(rois)} ROI(s) from {os.path.basename(load_path)}")
+        self.status.setText(
+            f"Loaded {len(rois)} ROI(s) from {os.path.basename(load_path)}"
+        )
 
     def _current_slice_image(self) -> Optional[np.ndarray]:
         if self.loaded is None:
@@ -1800,7 +1922,9 @@ class MainWindow(QMainWindow):
             x = pts[:, 0]
             y = pts[:, 1]
             area = 0.5 * abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
-            perimeter = float(np.sum(np.hypot(np.diff(np.r_[x, x[0]]), np.diff(np.r_[y, y[0]]))))
+            perimeter = float(
+                np.sum(np.hypot(np.diff(np.r_[x, x[0]]), np.diff(np.r_[y, y[0]])))
+            )
             return float(area), perimeter
         if typ == ImageViewer.ROI_RECT:
             w = float(state.get("w", 0.0))
@@ -1810,7 +1934,11 @@ class MainWindow(QMainWindow):
             a = float(state.get("w", 0.0)) / 2.0
             b = float(state.get("h", 0.0)) / 2.0
             area = np.pi * a * b
-            perimeter = float(np.pi * (3 * (a + b) - np.sqrt((3 * a + b) * (a + 3 * b)))) if a > 0 and b > 0 else 0.0
+            perimeter = (
+                float(np.pi * (3 * (a + b) - np.sqrt((3 * a + b) * (a + 3 * b))))
+                if a > 0 and b > 0
+                else 0.0
+            )
             return float(area), perimeter
         return 0.0, 0.0
 
@@ -1832,7 +1960,9 @@ class MainWindow(QMainWindow):
             yy, xx = np.mgrid[ymin:ymax, xmin:xmax]
             x = xx + 0.5
             y = yy + 0.5
-            mask[ymin:ymax, xmin:xmax] = (x >= x0) & (x <= x0 + rw) & (y >= y0) & (y <= y0 + rh)
+            mask[ymin:ymax, xmin:xmax] = (
+                (x >= x0) & (x <= x0 + rw) & (y >= y0) & (y <= y0 + rh)
+            )
             return mask
         if typ == ImageViewer.ROI_ELLIPSE:
             x0 = float(state.get("x", 0.0))
@@ -1852,7 +1982,9 @@ class MainWindow(QMainWindow):
             cy = y0 + rh / 2.0
             a = max(rw / 2.0, 1e-9)
             b = max(rh / 2.0, 1e-9)
-            mask[ymin:ymax, xmin:xmax] = ((x - cx) / a) ** 2 + ((y - cy) / b) ** 2 <= 1.0
+            mask[ymin:ymax, xmin:xmax] = ((x - cx) / a) ** 2 + (
+                (y - cy) / b
+            ) ** 2 <= 1.0
             return mask
         if typ == ImageViewer.ROI_POLYGON:
             pts = np.array(state.get("points", []), dtype=np.float64)
@@ -1874,7 +2006,9 @@ class MainWindow(QMainWindow):
                 j = (i + 1) % len(pts)
                 xi, yi = px[i], py[i]
                 xj, yj = px[j], py[j]
-                intersect = ((yi > y) != (yj > y)) & (x < (xj - xi) * (y - yi) / ((yj - yi) + 1e-12) + xi)
+                intersect = ((yi > y) != (yj > y)) & (
+                    x < (xj - xi) * (y - yi) / ((yj - yi) + 1e-12) + xi
+                )
                 inside ^= intersect
             mask[ymin:ymax, xmin:xmax] = inside
             return mask
@@ -1901,7 +2035,7 @@ class MainWindow(QMainWindow):
             ImageViewer.ROI_RECT: "Rectangle",
             ImageViewer.ROI_ELLIPSE: "Ellipse",
         }
-        self.lbl_roi_type.setText(typ_map.get(state.get("type"), "Unknown"))
+        self.lbl_roi_type.setText(typ_map.get(state.get("type", ""), "Unknown"))
         typ = state.get("type")
         if typ in (ImageViewer.ROI_RECT, ImageViewer.ROI_ELLIPSE):
             x = float(state.get("x", 0.0))
@@ -1939,7 +2073,9 @@ class MainWindow(QMainWindow):
 
         self.lbl_roi_pixels.setText(str(int(vals.size)))
         self.lbl_roi_mean.setText(f"{float(np.mean(vals)):.4g}")
-        self.lbl_roi_minmax.setText(f"{float(np.min(vals)):.4g} / {float(np.max(vals)):.4g}")
+        self.lbl_roi_minmax.setText(
+            f"{float(np.min(vals)):.4g} / {float(np.max(vals)):.4g}"
+        )
         self.lbl_roi_std.setText(f"{float(np.std(vals)):.4g}")
 
     # ---------------- Drag & Drop ----------------
@@ -1986,7 +2122,9 @@ class MainWindow(QMainWindow):
         if key in (Qt.Key_Left, Qt.Key_Right):
             if self.loaded is not None and self.total_slices > 1:
                 delta = 1 if key == Qt.Key_Right else -1
-                new_slice = max(0, min(self.total_slices - 1, self.current_slice + delta))
+                new_slice = max(
+                    0, min(self.total_slices - 1, self.current_slice + delta)
+                )
                 if new_slice != self.current_slice:
                     self.slice_slider.setValue(new_slice)
             event.accept()

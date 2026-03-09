@@ -20,3 +20,10 @@ To run the program, use:
 uv run src/main.py
 ```
 
+## Building the App
+To build the standalone executable, run:
+
+```bash
+uv run pyinstaller PyTif.spec
+```
+

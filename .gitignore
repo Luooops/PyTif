@@ -209,3 +209,5 @@ __marimo__/
 # .vscode
 .vscode/
 .python-version
+dist/
+build/
