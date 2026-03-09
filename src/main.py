@@ -5,10 +5,8 @@ import math
 import sys
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-
 import numpy as np
 import tifffile
-
 from PySide6.QtCore import Qt, QSize, QEvent, QSettings, QPointF, QLineF, QRectF
 from PySide6.QtGui import (
     QImage,
