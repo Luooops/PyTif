@@ -100,6 +100,17 @@ class MainWindow(QMainWindow):
         self.btn_file.setMenu(self.file_dropdown)
         top.addWidget(self.btn_file)
 
+        # Close dropdown button
+        self.btn_close = QToolButton()
+        self.btn_close.setText("Close")
+        self.btn_close.setPopupMode(QToolButton.MenuButtonPopup)
+        self.btn_close.clicked.connect(self.close_current_entry)
+        self.close_dropdown = QMenu(self.btn_close)
+        self.close_dropdown.addAction("Close Current", self.close_current_entry)
+        self.close_dropdown.addAction("Close All", self.close_all_entries)
+        self.btn_close.setMenu(self.close_dropdown)
+        top.addWidget(self.btn_close)
+
         self.btn_sidebar = QPushButton("Hide Sidebar")
         self.btn_sidebar.clicked.connect(self.toggle_sidebar)
         top.addWidget(self.btn_sidebar)
@@ -386,6 +397,47 @@ class MainWindow(QMainWindow):
             return
 
         self.status.setText(f"Path does not exist: {path}")
+
+    # ---------------- Close Logic ----------------
+    def close_current_entry(self):
+        row = self.list_widget.currentRow()
+        if row < 0 or row >= len(self.entries):
+            return
+
+        # Remove from list widget and entries
+        self.list_widget.takeItem(row)
+        _, path = self.entries.pop(row)
+
+        # Clear ROIs for this file if it was a tif
+        self.rois_by_file.pop(path, None)
+        self.selected_roi_by_file.pop(path, None)
+
+        # If we just closed the currently loaded image, clear viewer or load next
+        if self.list_widget.count() == 0:
+            self.loaded = None
+            self.total_slices = 1
+            self.viewer.set_image(QPixmap())
+            self.slice_controls.hide()
+            self.status.setText("All files closed.")
+        else:
+            # list_widget will automatically update currentRow if possible
+            new_row = self.list_widget.currentRow()
+            if new_row >= 0:
+                self.on_entry_selected(new_row)
+            else:
+                self.loaded = None
+                self.viewer.set_image(QPixmap())
+
+    def close_all_entries(self):
+        self.list_widget.clear()
+        self.entries.clear()
+        self.rois_by_file.clear()
+        self.selected_roi_by_file.clear()
+        self.loaded = None
+        self.total_slices = 1
+        self.viewer.set_image(QPixmap())
+        self.slice_controls.hide()
+        self.status.setText("All files closed.")
 
     # ---------------- Folder browsing ----------------
     def add_folder(self, folder: str):
