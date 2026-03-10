@@ -641,7 +641,7 @@ class MainWindow(QMainWindow):
             self._show_roi_panel()
             self._show_roi_window()
             self.status.setText(
-                "ROI mode: choose rectangle, ellipse, or polygon from the floating panel. Press Esc to cancel current drawing."
+                "ROI mode: choose rectangle, ellipse, or polygon from the floating panel. Press Esc to delete selected ROI."
             )
         else:
             self._hide_roi_panel()
@@ -710,12 +710,12 @@ class MainWindow(QMainWindow):
             self.viewer.btn_roi.setChecked(True)
         self.viewer.set_roi_type(roi_type)
         labels = {
-            ImageViewer.ROI_RECT: "Rectangle ROI",
-            ImageViewer.ROI_ELLIPSE: "Ellipse ROI",
-            ImageViewer.ROI_POLYGON: "Polygon ROI",
+            ImageViewer.ROI_RECT: "Rectangle",
+            ImageViewer.ROI_ELLIPSE: "Ellipse",
+            ImageViewer.ROI_POLYGON: "Polygon",
         }
         self.status.setText(
-            f"ROI mode: {labels.get(roi_type, '')}. Press Esc to cancel current drawing."
+            f"ROI mode: {labels.get(roi_type, '')}. Press Esc to delete selected ROI."
         )
 
     def _current_file_path(self) -> Optional[str]:
