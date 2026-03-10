@@ -93,7 +93,7 @@ class MainWindow(QMainWindow):
         self.btn_file = QToolButton()
         self.btn_file.setText("Open")
         self.btn_file.setPopupMode(QToolButton.MenuButtonPopup)
-        self.btn_file.clicked.connect(self.open_file_dialog)
+        self.btn_file.clicked.connect(self.add_files_dialog)
         self.file_dropdown = QMenu(self.btn_file)
         self.file_dropdown.addAction("Open File", self.open_file_dialog)
         self.file_dropdown.addAction("Open Folder", self.open_folder_dialog)
@@ -105,24 +105,10 @@ class MainWindow(QMainWindow):
         self.btn_sidebar.clicked.connect(self.toggle_sidebar)
         top.addWidget(self.btn_sidebar)
 
-        self.btn_zoom_out = QPushButton("−")
-        self.btn_zoom_in = QPushButton("+")
-        self.btn_fit = QPushButton("Fit")
-        self.btn_roi = QPushButton("ROI")
-        self.btn_roi.setCheckable(True)
-        top.addWidget(self.btn_zoom_out)
-        top.addWidget(self.btn_zoom_in)
-        top.addWidget(self.btn_fit)
-        top.addWidget(self.btn_roi)
-
         self.status = QLabel("")
         self.status.setTextInteractionFlags(Qt.TextSelectableByMouse)
         top.addWidget(self.status, 1)
 
-        self.btn_zoom_in.clicked.connect(self._zoom_in)
-        self.btn_zoom_out.clicked.connect(self._zoom_out)
-        self.btn_fit.clicked.connect(self._fit)
-        self.btn_roi.toggled.connect(self._toggle_roi_mode)
         self._build_roi_panel()
 
         self.splitter = QSplitter(Qt.Horizontal)
@@ -140,6 +126,10 @@ class MainWindow(QMainWindow):
 
         self.viewer = ImageViewer()
         self.viewer.on_rois_changed = self._on_viewer_rois_changed
+        self.viewer.btn_zoom_in.clicked.connect(self._zoom_in)
+        self.viewer.btn_zoom_out.clicked.connect(self._zoom_out)
+        self.viewer.btn_fit.clicked.connect(self._fit)
+        self.viewer.btn_roi.toggled.connect(self._toggle_roi_mode)
         right_layout.addWidget(self.viewer, 1)
 
         # Slice controls (only for multi-slice)
@@ -616,11 +606,16 @@ class MainWindow(QMainWindow):
 
     def _toggle_roi_mode(self, enabled: bool):
         self.viewer.set_roi_mode(enabled)
+        # Ensure buttons stay in sync
+        if self.viewer.btn_roi.isChecked() != enabled:
+            self.viewer.btn_roi.blockSignals(True)
+            self.viewer.btn_roi.setChecked(enabled)
+            self.viewer.btn_roi.blockSignals(False)
+
         if enabled:
             self._sync_roi_type_buttons()
             self._show_roi_panel()
             self._show_roi_window()
-            self.btn_roi.setText("ROI On")
             self.status.setText(
                 "ROI mode: choose rectangle, ellipse, or polygon from the floating panel. Press Esc to cancel current drawing."
             )
@@ -630,7 +625,6 @@ class MainWindow(QMainWindow):
             self.btn_roi_rect.setChecked(False)
             self.btn_roi_ellipse.setChecked(False)
             self.btn_roi_poly.setChecked(False)
-            self.btn_roi.setText("ROI")
             # Restore status text to show current image/folder info
             path = self._current_file_path()
             if path:
@@ -641,9 +635,14 @@ class MainWindow(QMainWindow):
     def _show_roi_panel(self):
         self.roi_panel.adjustSize()
         if not self.roi_panel.user_moved or not self.roi_panel.isVisible():
-            anchor = self.btn_roi.mapTo(self, self.btn_roi.rect().bottomLeft())
-            x = anchor.x()
-            y = anchor.y() + 6
+            # map the viewer overlay button's coordinate to the main window's coordinate space
+            global_pos = self.viewer.overlay_panel.mapToGlobal(
+                self.viewer.btn_roi.pos()
+            )
+            local_pos = self.mapFromGlobal(global_pos)
+
+            x = local_pos.x() - self.roi_panel.width() - 10
+            y = local_pos.y()
             self.roi_panel.move(x, y)
         self._clamp_roi_panel_pos()
         self.roi_panel.show()
@@ -666,8 +665,8 @@ class MainWindow(QMainWindow):
         self.roi_window.hide_programmatically()
 
     def _on_roi_window_closed(self):
-        if self.btn_roi.isChecked():
-            self.btn_roi.setChecked(False)
+        if self.viewer.btn_roi.isChecked():
+            self.viewer.btn_roi.setChecked(False)
 
     def _clamp_roi_panel_pos(self):
         max_x = max(0, self.width() - self.roi_panel.width() - 8)
@@ -683,8 +682,8 @@ class MainWindow(QMainWindow):
         self.btn_roi_poly.setChecked(t == ImageViewer.ROI_POLYGON)
 
     def _select_roi_type(self, roi_type: str):
-        if not self.btn_roi.isChecked():
-            self.btn_roi.setChecked(True)
+        if not self.viewer.btn_roi.isChecked():
+            self.viewer.btn_roi.setChecked(True)
         self.viewer.set_roi_type(roi_type)
         labels = {
             ImageViewer.ROI_RECT: "Rectangle ROI",
@@ -1005,7 +1004,7 @@ class MainWindow(QMainWindow):
     def keyPressEvent(self, event: QKeyEvent):
         key = event.key()
 
-        if self.btn_roi.isChecked():
+        if self.viewer.btn_roi.isChecked():
             if key == Qt.Key_Left and self.viewer.nudge_selected_roi(-1, 0):
                 event.accept()
                 return
@@ -1036,7 +1035,7 @@ class MainWindow(QMainWindow):
             event.accept()
             return
 
-        if key == Qt.Key_Escape and self.btn_roi.isChecked():
+        if key == Qt.Key_Escape and self.viewer.btn_roi.isChecked():
             # Force focus back to main window or viewer to ensure key events are captured correctly
             self.setFocus()
             self.viewer.cancel_current_roi()

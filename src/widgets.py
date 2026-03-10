@@ -146,6 +146,9 @@ class ImageViewer(QGraphicsView):
         self._pan_ema = QPointF(0.0, 0.0)
         self._pan_residual = QPointF(0.0, 0.0)
 
+        # UI Overlay
+        self._setup_ui_overlay()
+
         # ROI state
         self._roi_mode = False
         self._roi_type = self.ROI_NONE
@@ -194,10 +197,64 @@ class ImageViewer(QGraphicsView):
         ] = None
         self._suppress_notify = False
 
+    def _setup_ui_overlay(self):
+        # Create a container for the buttons
+        self.overlay_panel = QFrame(self)
+        self.overlay_panel.setObjectName("overlayPanel")
+        self.overlay_panel.setStyleSheet(
+            "#overlayPanel { background: rgba(40,40,40,150); border: 1px solid #555; border-radius: 4px; }"
+            "QPushButton { background: rgba(60,60,60,200); border: 1px solid #777; border-radius: 2px; color: white; min-width: 32px; min-height: 32px; font-weight: bold; font-size: 16px; }"
+            "QPushButton:hover { background: rgba(80,80,80,220); border-color: #999; }"
+            "QPushButton:pressed { background: rgba(45,123,216,200); }"
+            "QPushButton:checked { background: rgba(45,123,216,220); border-color: #64a7ff; }"
+        )
+
+        v_layout = QVBoxLayout(self.overlay_panel)
+        v_layout.setContentsMargins(4, 4, 4, 4)
+        v_layout.setSpacing(4)
+
+        self.btn_zoom_in = QPushButton("+")
+        self.btn_zoom_in.setToolTip("Zoom In")
+        self.btn_zoom_out = QPushButton("−")
+        self.btn_zoom_out.setToolTip("Zoom Out")
+        self.btn_fit = QPushButton("Fit")
+        self.btn_fit.setToolTip("Fit View")
+        self.btn_fit.setStyleSheet("font-size: 11px;")
+        self.btn_roi = QPushButton("ROI")
+        self.btn_roi.setCheckable(True)
+        self.btn_roi.setToolTip("Toggle ROI Mode")
+        self.btn_roi.setStyleSheet("font-size: 11px;")
+
+        v_layout.addWidget(self.btn_zoom_in)
+        v_layout.addWidget(self.btn_zoom_out)
+        v_layout.addWidget(self.btn_fit)
+        v_layout.addWidget(self.btn_roi)
+
+        self.overlay_panel.adjustSize()
+        self.overlay_panel.hide()
+        self._update_overlay_pos()
+
+    def _update_overlay_pos(self):
+        # Position at top right with some margin
+        margin = 10
+        x = self.width() - self.overlay_panel.width() - margin
+        y = margin
+        self.overlay_panel.move(max(0, x), y)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_overlay_pos()
+
     def set_image(self, pixmap: QPixmap, fit: bool = True):
         self._pix_item.setPixmap(pixmap)
         self._scene.setSceneRect(pixmap.rect())
         self._has_image = not pixmap.isNull()
+
+        if self._has_image:
+            self.overlay_panel.show()
+        else:
+            self.overlay_panel.hide()
+
         if fit:
             self.fit_in_view()
 
