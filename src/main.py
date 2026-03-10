@@ -125,6 +125,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.splitter, 1)
 
         self.list_widget = QListWidget()
+        self.list_widget.setSelectionMode(QListWidget.ExtendedSelection)
+        self.list_widget.setDragDropMode(QListWidget.InternalMove)
+        self.list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.list_widget.customContextMenuRequested.connect(self.on_list_context_menu)
         self.list_widget.currentRowChanged.connect(self.on_entry_selected)
         self.list_widget.itemDoubleClicked.connect(self.on_item_double_clicked)
         self.splitter.addWidget(self.list_widget)
@@ -181,6 +185,12 @@ class MainWindow(QMainWindow):
         act_open_folder = QAction("Open Folder…", self)
         act_open_folder.triggered.connect(self.open_folder_dialog)
         file_menu.addAction(act_open_folder)
+
+        file_menu.addSeparator()
+
+        act_close_all = QAction("Close All", self)
+        act_close_all.triggered.connect(self.close_all_entries)
+        file_menu.addAction(act_close_all)
 
         file_menu.addSeparator()
 
@@ -403,14 +413,32 @@ class MainWindow(QMainWindow):
         row = self.list_widget.currentRow()
         if row < 0 or row >= len(self.entries):
             return
+        self.close_entries_by_indices([row])
 
-        # Remove from list widget and entries
-        self.list_widget.takeItem(row)
-        _, path = self.entries.pop(row)
+    def close_selected_entries(self):
+        items = self.list_widget.selectedItems()
+        if not items:
+            return
+        indices = sorted([self.list_widget.row(item) for item in items], reverse=True)
+        self.close_entries_by_indices(indices)
 
-        # Clear ROIs for this file if it was a tif
-        self.rois_by_file.pop(path, None)
-        self.selected_roi_by_file.pop(path, None)
+    def close_entries_by_indices(self, indices: List[int]):
+        # indices should be sorted descending to avoid index shift issues
+        indices = sorted(indices, reverse=True)
+
+        currently_viewed_path = self._current_tif_name()
+
+        for row in indices:
+            if row < 0 or row >= len(self.entries):
+                continue
+
+            # Remove from list widget and entries
+            self.list_widget.takeItem(row)
+            _, path = self.entries.pop(row)
+
+            # Clear ROIs for this file if it was a tif
+            self.rois_by_file.pop(path, None)
+            self.selected_roi_by_file.pop(path, None)
 
         # If we just closed the currently loaded image, clear viewer or load next
         if self.list_widget.count() == 0:
@@ -420,13 +448,18 @@ class MainWindow(QMainWindow):
             self.slice_controls.hide()
             self.status.setText("All files closed.")
         else:
-            # list_widget will automatically update currentRow if possible
-            new_row = self.list_widget.currentRow()
-            if new_row >= 0:
-                self.on_entry_selected(new_row)
-            else:
-                self.loaded = None
-                self.viewer.set_image(QPixmap())
+            # Check if currently viewed was closed
+            still_around = any(
+                path == currently_viewed_path for typ, path in self.entries
+            )
+            if not still_around:
+                new_row = self.list_widget.currentRow()
+                if new_row >= 0:
+                    self.on_entry_selected(new_row)
+                else:
+                    self.loaded = None
+                    self.viewer.set_image(QPixmap())
+            # Otherwise keep current
 
     def close_all_entries(self):
         self.list_widget.clear()
@@ -473,6 +506,17 @@ class MainWindow(QMainWindow):
         typ, path = self.entries[row]
         if typ == "tif":
             self.load_tiff(path)
+
+    def on_list_context_menu(self, pos):
+        item = self.list_widget.itemAt(pos)
+        selected_items = self.list_widget.selectedItems()
+        if not selected_items:
+            return
+
+        menu = QMenu()
+        close_action = menu.addAction(f"Close Selected ({len(selected_items)})")
+        close_action.triggered.connect(self.close_selected_entries)
+        menu.exec(self.list_widget.viewport().mapToGlobal(pos))
 
     def on_entry_selected(self, row: int):
         if row < 0 or row >= len(self.entries):
