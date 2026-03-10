@@ -94,10 +94,10 @@ class MainWindow(QMainWindow):
         self.btn_file = QToolButton()
         self.btn_file.setText("Open")
         self.btn_file.setPopupMode(QToolButton.MenuButtonPopup)
-        self.btn_file.clicked.connect(self.open_unified_dialog)
+        self.btn_file.clicked.connect(self.open_file_dialog)
         self.file_dropdown = QMenu(self.btn_file)
-        self.file_dropdown.addAction("Open File", self.open_file_dialog)
-        self.file_dropdown.addAction("Open Folder", self.open_folder_dialog)
+        self.file_dropdown.addAction("Open File(s)", self.open_file_dialog)
+        self.file_dropdown.addAction("Open Folder(s)", self.open_folder_dialog)
         self.btn_file.setMenu(self.file_dropdown)
         top.addWidget(self.btn_file)
 
@@ -178,12 +178,12 @@ class MainWindow(QMainWindow):
         # macOS standard menu
         file_menu = self.menuBar().addMenu("File")
 
-        act_open_file = QAction("Open File…", self)
+        act_open_file = QAction("Open File(s)", self)
         act_open_file.setShortcut("Meta+O")  # ⌘O
         act_open_file.triggered.connect(self.open_file_dialog)
         file_menu.addAction(act_open_file)
 
-        act_open_folder = QAction("Open Folder…", self)
+        act_open_folder = QAction("Open Folder(s)", self)
         act_open_folder.triggered.connect(self.open_folder_dialog)
         file_menu.addAction(act_open_folder)
 
@@ -336,18 +336,6 @@ class MainWindow(QMainWindow):
         self.roi_window.btn_load.clicked.connect(self._load_rois_into_current_file)
         self.roi_window.on_closed = self._on_roi_window_closed
 
-    def open_unified_dialog(self):
-        start = self.current_folder or os.path.expanduser("~")
-        dialog = QFileDialog(self, "Open File or Folder", start)
-        dialog.setFileMode(QFileDialog.ExistingFiles)
-        dialog.setOption(QFileDialog.DontUseNativeDialog, True)
-        dialog.setNameFilters(["TIFF files (*.tif *.tiff)", "All files (*)"])
-        dialog.selectNameFilter("TIFF files (*.tif *.tiff)")
-        if dialog.exec():
-            selected_paths = dialog.selectedFiles()
-            for path in selected_paths:
-                self.open_path(path)
-
     # ---------------- Open ----------------
     def open_file_dialog(self):
         start = self.current_folder or os.path.expanduser("~")
@@ -424,6 +412,10 @@ class MainWindow(QMainWindow):
         self.close_entries_by_indices(indices)
 
     def close_entries_by_indices(self, indices: List[int]):
+        # Ensure latest state is reflected in sidebar before closing
+        self._refresh_roi_list()
+        self._update_roi_stats()
+
         # indices should be sorted descending to avoid index shift issues
         indices = sorted(indices, reverse=True)
 
@@ -441,6 +433,26 @@ class MainWindow(QMainWindow):
             self.rois_by_file.pop(path, None)
             self.selected_roi_by_file.pop(path, None)
 
+        # Remove empty directory headers
+        row = 0
+        while row < self.list_widget.count():
+            typ, path = self.entries[row]
+            if typ == "dir":
+                # Check if next item is a file within this directory or another directory
+                # If the next item is a 'tif', and its path starts with this dir, then it's not empty.
+                is_empty = True
+                if row + 1 < len(self.entries):
+                    next_typ, next_path = self.entries[row + 1]
+                    if next_typ == "tif" and next_path.startswith(path):
+                        is_empty = False
+
+                if is_empty:
+                    self.list_widget.takeItem(row)
+                    self.entries.pop(row)
+                    # Don't increment row since we removed the current one
+                    continue
+            row += 1
+
         # If we just closed the currently loaded image, clear viewer or load next
         if self.list_widget.count() == 0:
             self.loaded = None
@@ -454,6 +466,13 @@ class MainWindow(QMainWindow):
                 path == currently_viewed_path for typ, path in self.entries
             )
             if not still_around:
+                # Selection index likely shifted. Deselect everything in the list widget
+                # so the user can click a new file to trigger selection change/load.
+                self.list_widget.blockSignals(True)
+                self.list_widget.setCurrentRow(-1)
+                self.list_widget.clearSelection()
+                self.list_widget.blockSignals(False)
+
                 self.loaded = None
                 self.viewer.set_image(QPixmap())
                 self.slice_controls.hide()
@@ -486,26 +505,57 @@ class MainWindow(QMainWindow):
         self.status.setText(f"Scanning {os.path.basename(folder)} for TIFF files...")
         QApplication.processEvents()
 
-        try:
-            names = os.listdir(folder)
-        except Exception as e:
-            self.status.setText(f"Failed to list folder: {folder} ({e})")
+        found_folders = []
+        for root, dirs, files in os.walk(folder):
+            tif_files = [f for f in files if f.lower().endswith(SUPPORTED_EXTS)]
+            if tif_files:
+                found_folders.append(root)
+
+        if not found_folders:
+            self.status.setText(
+                f"No TIFF files found in {folder} or its subdirectories."
+            )
             return
 
-        files = sorted(
-            [
-                os.path.join(folder, n)
-                for n in names
-                if os.path.isfile(os.path.join(folder, n))
-                and n.lower().endswith(SUPPORTED_EXTS)
-            ],
-            key=natural_key,
-        )
+        # Sort folders naturally
+        found_folders.sort(key=natural_key)
 
-        if files:
-            self.add_files(files, auto_load=False)
-        else:
-            self.status.setText(f"No TIFF files found in {folder}")
+        for fld in found_folders:
+            # Add a directory entry to the list
+            rel_path = os.path.relpath(fld, os.path.dirname(folder))
+            display_name = f"[{rel_path}]"
+
+            self.entries.append(("dir", fld))
+            item = QListWidgetItem(display_name)
+            item.setToolTip(fld)
+            item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
+            font = item.font()
+            font.setBold(True)
+            item.setFont(font)
+            self.list_widget.addItem(item)
+
+            # Add the files within this folder
+            try:
+                names = sorted(
+                    [
+                        n
+                        for n in os.listdir(fld)
+                        if os.path.isfile(os.path.join(fld, n))
+                        and n.lower().endswith(SUPPORTED_EXTS)
+                    ],
+                    key=natural_key,
+                )
+            except Exception:
+                continue
+
+            for n in names:
+                ap = os.path.join(fld, n)
+                self.entries.append(("tif", ap))
+                file_item = QListWidgetItem(f"  {n}")
+                file_item.setToolTip(ap)
+                self.list_widget.addItem(file_item)
+
+        self.status.setText(f"Found {len(found_folders)} folder(s) containing TIFFs.")
 
     def on_item_double_clicked(self, item: QListWidgetItem):
         row = self.list_widget.row(item)
