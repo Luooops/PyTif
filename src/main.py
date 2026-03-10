@@ -93,7 +93,7 @@ class MainWindow(QMainWindow):
         self.btn_file = QToolButton()
         self.btn_file.setText("Open")
         self.btn_file.setPopupMode(QToolButton.MenuButtonPopup)
-        self.btn_file.clicked.connect(self.open_file_dialog)
+        self.btn_file.clicked.connect(self.open_unified_dialog)
         self.file_dropdown = QMenu(self.btn_file)
         self.file_dropdown.addAction("Open File", self.open_file_dialog)
         self.file_dropdown.addAction("Open Folder", self.open_folder_dialog)
@@ -314,6 +314,19 @@ class MainWindow(QMainWindow):
         self.roi_window.btn_load.clicked.connect(self._load_rois_into_current_file)
         self.roi_window.on_closed = self._on_roi_window_closed
 
+    def open_unified_dialog(self):
+        start = self.current_folder or os.path.expanduser("~")
+        dialog = QFileDialog(self, "Open File or Folder", start)
+        dialog.setFileMode(QFileDialog.Directory)
+        dialog.setOption(QFileDialog.ShowDirsOnly, False)
+        dialog.setOption(QFileDialog.DontUseNativeDialog, True)
+        dialog.setNameFilters(["TIFF files (*.tif *.tiff)", "All files (*)"])
+        dialog.selectNameFilter("TIFF files (*.tif *.tiff)")
+        if dialog.exec():
+            selected_paths = dialog.selectedFiles()
+            for path in selected_paths:
+                self.open_path(path)
+
     # ---------------- Open ----------------
     def open_file_dialog(self):
         start = self.current_folder or os.path.expanduser("~")
@@ -394,7 +407,7 @@ class MainWindow(QMainWindow):
             ],
             key=natural_key,
         )
-        
+
         if files:
             self.add_files(files)
         else:
