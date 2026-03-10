@@ -631,6 +631,12 @@ class MainWindow(QMainWindow):
             self.btn_roi_ellipse.setChecked(False)
             self.btn_roi_poly.setChecked(False)
             self.btn_roi.setText("ROI")
+            # Restore status text to show current image/folder info
+            path = self._current_file_path()
+            if path:
+                self._update_slice_info(path)
+            else:
+                self.status.setText("")
 
     def _show_roi_panel(self):
         self.roi_panel.adjustSize()
@@ -1031,6 +1037,8 @@ class MainWindow(QMainWindow):
             return
 
         if key == Qt.Key_Escape and self.btn_roi.isChecked():
+            # Force focus back to main window or viewer to ensure key events are captured correctly
+            self.setFocus()
             self.viewer.cancel_current_roi()
             event.accept()
             return

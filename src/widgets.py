@@ -328,20 +328,37 @@ class ImageViewer(QGraphicsView):
             self._notify_rois_changed()
 
     def cancel_current_roi(self):
+        had_drawing = False
         if self._drawing_points:
             self._drawing_points = []
             self._drawing_hover = None
             self._hover_vertex_idx = None
-            self._update_roi_graphics()
+            had_drawing = True
+
         if self._roi_type in (self.ROI_RECT, self.ROI_ELLIPSE) and self._shape_drawing:
             self._shape_drawing = False
             self._shape_start = None
             self._shape_end = None
-            self._update_roi_graphics()
+            had_drawing = True
+
         self._drag_vertex_idx = None
         self._drag_rect_handle = None
         self._drag_move_roi = False
         self._drag_last_scene = None
+
+        if had_drawing:
+            self._update_roi_graphics()
+            return
+
+        # If no active drawing, delete the selected ROI
+        if self._selected_idx is not None and 0 <= self._selected_idx < len(self._rois):
+            del self._rois[self._selected_idx]
+            if not self._rois:
+                self._selected_idx = None
+            else:
+                self._selected_idx = min(self._selected_idx, len(self._rois) - 1)
+            self._update_roi_graphics()
+            self._notify_rois_changed()
 
     def clear_all_rois(self):
         self.clear_roi(notify=True)
