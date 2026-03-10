@@ -339,8 +339,7 @@ class MainWindow(QMainWindow):
     def open_unified_dialog(self):
         start = self.current_folder or os.path.expanduser("~")
         dialog = QFileDialog(self, "Open File or Folder", start)
-        dialog.setFileMode(QFileDialog.Directory)
-        dialog.setOption(QFileDialog.ShowDirsOnly, False)
+        dialog.setFileMode(QFileDialog.ExistingFiles)
         dialog.setOption(QFileDialog.DontUseNativeDialog, True)
         dialog.setNameFilters(["TIFF files (*.tif *.tiff)", "All files (*)"])
         dialog.selectNameFilter("TIFF files (*.tif *.tiff)")
@@ -361,7 +360,7 @@ class MainWindow(QMainWindow):
         if paths:
             self.add_files(paths)
 
-    def add_files(self, paths: List[str]):
+    def add_files(self, paths: List[str], auto_load: bool = True):
         existing = {os.path.abspath(p) for typ, p in self.entries if typ == "tif"}
         added_indices: List[int] = []
         for p in paths:
@@ -383,9 +382,10 @@ class MainWindow(QMainWindow):
             self.status.setText("No new TIFF files were added.")
             return
 
-        if self.loaded is None:
+        if auto_load and self.loaded is None:
             self.list_widget.setCurrentRow(added_indices[0])
-        self.status.setText(f"Added {len(added_indices)} file(s).")
+        else:
+            self.status.setText(f"Added {len(added_indices)} file(s).")
 
     def open_folder_dialog(self):
         start = self.current_folder or os.path.expanduser("~")
@@ -454,12 +454,11 @@ class MainWindow(QMainWindow):
                 path == currently_viewed_path for typ, path in self.entries
             )
             if not still_around:
-                new_row = self.list_widget.currentRow()
-                if new_row >= 0:
-                    self.on_entry_selected(new_row)
-                else:
-                    self.loaded = None
-                    self.viewer.set_image(QPixmap())
+                self.loaded = None
+                self.viewer.set_image(QPixmap())
+                self.slice_controls.hide()
+                self._refresh_roi_list()
+                self._update_roi_stats()
             # Otherwise keep current
 
     def close_all_entries(self):
@@ -504,7 +503,7 @@ class MainWindow(QMainWindow):
         )
 
         if files:
-            self.add_files(files)
+            self.add_files(files, auto_load=False)
         else:
             self.status.setText(f"No TIFF files found in {folder}")
 
@@ -571,6 +570,15 @@ class MainWindow(QMainWindow):
         self._apply_rois_for_current_file()
         self._update_roi_stats()
         self._update_slice_info(path)
+
+        # Clear the "Loading..." status after everything is done
+        self.status.setText("")
+        if self.current_folder:
+            self.status.setText(
+                f"Folder: {self.current_folder} | {os.path.basename(path)}"
+            )
+        else:
+            self.status.setText(os.path.basename(path))
 
     def _update_slice_info(self, path: str):
         name = os.path.basename(path)
