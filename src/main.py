@@ -93,11 +93,10 @@ class MainWindow(QMainWindow):
         self.btn_file = QToolButton()
         self.btn_file.setText("Open")
         self.btn_file.setPopupMode(QToolButton.MenuButtonPopup)
-        self.btn_file.clicked.connect(self.add_files_dialog)
+        self.btn_file.clicked.connect(self.open_file_dialog)
         self.file_dropdown = QMenu(self.btn_file)
         self.file_dropdown.addAction("Open File", self.open_file_dialog)
         self.file_dropdown.addAction("Open Folder", self.open_folder_dialog)
-        self.file_dropdown.addAction("Add Files", self.add_files_dialog)
         self.btn_file.setMenu(self.file_dropdown)
         top.addWidget(self.btn_file)
 
@@ -171,10 +170,6 @@ class MainWindow(QMainWindow):
         act_open_folder = QAction("Open Folder…", self)
         act_open_folder.triggered.connect(self.open_folder_dialog)
         file_menu.addAction(act_open_folder)
-
-        act_add_files = QAction("Add Files…", self)
-        act_add_files.triggered.connect(self.add_files_dialog)
-        file_menu.addAction(act_add_files)
 
         file_menu.addSeparator()
 
@@ -322,20 +317,9 @@ class MainWindow(QMainWindow):
     # ---------------- Open ----------------
     def open_file_dialog(self):
         start = self.current_folder or os.path.expanduser("~")
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Open TIFF File",
-            start,
-            "TIFF files (*.tif *.tiff)",
-        )
-        if path:
-            self.open_path(path)
-
-    def add_files_dialog(self):
-        start = self.current_folder or os.path.expanduser("~")
         paths, _ = QFileDialog.getOpenFileNames(
             self,
-            "Add TIFF Files",
+            "Open TIFF Files",
             start,
             "TIFF files (*.tif *.tiff)",
         )
@@ -381,40 +365,17 @@ class MainWindow(QMainWindow):
     def open_path(self, path: str):
         path = os.path.abspath(path)
         if os.path.isdir(path):
-            self.root_folder = path
-            self.open_folder(path, select_first_tif=True)
+            self.add_folder(path)
             return
 
         if os.path.isfile(path):
-            self.open_single_file(path)
+            self.add_files([path])
             return
 
         self.status.setText(f"Path does not exist: {path}")
 
     # ---------------- Folder browsing ----------------
-    def open_single_file(self, path: str):
-        path = os.path.abspath(path)
-        folder = os.path.dirname(path)
-        self.root_folder = folder
-        self.current_folder = folder
-        self.entries = [("tif", path)]
-
-        self.list_widget.blockSignals(True)
-        self.list_widget.clear()
-        item = QListWidgetItem(os.path.basename(path))
-        item.setToolTip(path)
-        self.list_widget.addItem(item)
-        self.list_widget.setCurrentRow(0)
-        self.list_widget.blockSignals(False)
-
-        self.load_tiff(path)
-
-    def open_folder(
-        self,
-        folder: str,
-        select_first_tif: bool = False,
-        select_path: Optional[str] = None,
-    ):
+    def add_folder(self, folder: str):
         folder = os.path.abspath(folder)
         self.current_folder = folder
 
@@ -424,64 +385,20 @@ class MainWindow(QMainWindow):
             self.status.setText(f"Failed to list folder: {folder} ({e})")
             return
 
-        subdirs = sorted(
-            [n for n in names if os.path.isdir(os.path.join(folder, n))],
-            key=natural_key,
-        )
         files = sorted(
             [
-                n
+                os.path.join(folder, n)
                 for n in names
                 if os.path.isfile(os.path.join(folder, n))
                 and n.lower().endswith(SUPPORTED_EXTS)
             ],
             key=natural_key,
         )
-
-        self.entries = []
-        if self.root_folder and os.path.abspath(folder) != os.path.abspath(
-            self.root_folder
-        ):
-            self.entries.append(("up", os.path.dirname(folder)))
-
-        for d in subdirs:
-            self.entries.append(("dir", os.path.join(folder, d)))
-        for f in files:
-            self.entries.append(("tif", os.path.join(folder, f)))
-
-        self.list_widget.blockSignals(True)
-        self.list_widget.clear()
-
-        for typ, p in self.entries:
-            if typ == "up":
-                text = "⬅︎  .. (Back)"
-            elif typ == "dir":
-                text = f"📁  {os.path.basename(p)}"
-            else:
-                text = os.path.basename(p)
-
-            item = QListWidgetItem(text)
-            item.setToolTip(p)
-            self.list_widget.addItem(item)
-
-        self.list_widget.blockSignals(False)
-        self.status.setText(f"Folder: {folder}")
-
-        if select_path:
-            target = os.path.abspath(select_path)
-            for i, (typ, p) in enumerate(self.entries):
-                if typ == "tif" and os.path.abspath(p) == target:
-                    self.list_widget.setCurrentRow(i)
-                    return
-            select_first_tif = True
-
-        if select_first_tif:
-            for i, (typ, _) in enumerate(self.entries):
-                if typ == "tif":
-                    self.list_widget.setCurrentRow(i)
-                    return
-            if self.entries:
-                self.list_widget.setCurrentRow(0)
+        
+        if files:
+            self.add_files(files)
+        else:
+            self.status.setText(f"No TIFF files found in {folder}")
 
     def on_item_double_clicked(self, item: QListWidgetItem):
         row = self.list_widget.row(item)
@@ -489,9 +406,7 @@ class MainWindow(QMainWindow):
             return
 
         typ, path = self.entries[row]
-        if typ in ("dir", "up"):
-            self.open_folder(path, select_first_tif=True)
-        elif typ == "tif":
+        if typ == "tif":
             self.load_tiff(path)
 
     def on_entry_selected(self, row: int):
