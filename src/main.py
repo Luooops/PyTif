@@ -1141,6 +1141,16 @@ class MainWindow(QMainWindow):
             event.accept()
             return
 
+        if key == Qt.Key_Plus or key == Qt.Key_Equal:
+            self._zoom_in()
+            event.accept()
+            return
+
+        if key == Qt.Key_Minus:
+            self._zoom_out()
+            event.accept()
+            return
+
         super().keyPressEvent(event)
 
     def resizeEvent(self, event):
