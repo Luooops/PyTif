@@ -481,6 +481,10 @@ class MainWindow(QMainWindow):
             # Otherwise keep current
 
     def close_all_entries(self):
+        # Ensure latest state is reflected in sidebar before closing
+        self._refresh_roi_list()
+        self._update_roi_stats()
+
         self.status.setText("Closing all files...")
         QApplication.processEvents()
 
