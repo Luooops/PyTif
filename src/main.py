@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QButtonGroup,
     QFormLayout,
+    QProgressDialog,
 )
 
 from utils import (
@@ -462,6 +463,9 @@ class MainWindow(QMainWindow):
             # Otherwise keep current
 
     def close_all_entries(self):
+        self.status.setText("Closing all files...")
+        QApplication.processEvents()
+
         self.list_widget.clear()
         self.entries.clear()
         self.rois_by_file.clear()
@@ -469,13 +473,19 @@ class MainWindow(QMainWindow):
         self.loaded = None
         self.total_slices = 1
         self.viewer.set_image(QPixmap())
+        self.viewer.set_rois([], None)
         self.slice_controls.hide()
+        self._refresh_roi_list()
+        self._update_roi_stats()
         self.status.setText("All files closed.")
 
     # ---------------- Folder browsing ----------------
     def add_folder(self, folder: str):
         folder = os.path.abspath(folder)
         self.current_folder = folder
+
+        self.status.setText(f"Scanning {os.path.basename(folder)} for TIFF files...")
+        QApplication.processEvents()
 
         try:
             names = os.listdir(folder)
@@ -527,6 +537,9 @@ class MainWindow(QMainWindow):
 
     # ---------------- TIFF load/render ----------------
     def load_tiff(self, path: str):
+        self.status.setText(f"Loading {os.path.basename(path)}...")
+        QApplication.processEvents()
+
         try:
             arr = tifffile.imread(path)
             arr = rgb_like_to_gray(arr)
