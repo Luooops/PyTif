@@ -31,7 +31,6 @@ from PySide6.QtWidgets import (
     QFileSystemModel,
     QHBoxLayout,
     QLabel,
-    QListWidget,
     QListWidgetItem,
     QMainWindow,
     QPushButton,
@@ -65,6 +64,7 @@ class TiffTreeFilterProxyModel(QSortFilterProxyModel):
         super().__init__(parent)
         self._opened_files: Set[str] = set()
         self._opened_folders: Set[str] = set()
+        self._excluded_paths: Set[str] = set()
         self._root_path: Optional[str] = None
         self._view_root_path: Optional[str] = None
         self._dir_match_cache: Dict[str, bool] = {}
@@ -75,11 +75,13 @@ class TiffTreeFilterProxyModel(QSortFilterProxyModel):
         self,
         opened_files: Set[str],
         opened_folders: Set[str],
+        excluded_paths: Set[str],
         root_path: Optional[str],
         view_root_path: Optional[str],
     ):
         self._opened_files = {self._norm_path(path) for path in opened_files}
         self._opened_folders = {self._norm_path(path) for path in opened_folders}
+        self._excluded_paths = {self._norm_path(path) for path in excluded_paths}
         self._root_path = self._norm_path(root_path) if root_path else None
         self._view_root_path = (
             self._norm_path(view_root_path) if view_root_path else None
@@ -101,6 +103,13 @@ class TiffTreeFilterProxyModel(QSortFilterProxyModel):
             return True
         if path == self._root_path:
             return True
+
+        # Check exclusion first
+        if any(
+            self._is_under_or_equal(path, excluded) for excluded in self._excluded_paths
+        ):
+            return False
+
         if not self._is_under(path, self._root_path):
             return False
         if model.isDir(index):
@@ -144,6 +153,14 @@ class TiffTreeFilterProxyModel(QSortFilterProxyModel):
             with os.scandir(path) as entries:
                 for entry in entries:
                     entry_path = self._norm_path(entry.path)
+
+                    # Skip if excluded
+                    if any(
+                        self._is_under_or_equal(entry_path, excluded)
+                        for excluded in self._excluded_paths
+                    ):
+                        continue
+
                     if entry.is_dir(follow_symlinks=False):
                         if self._directory_matches(entry_path):
                             self._dir_match_cache[path] = True
@@ -164,6 +181,13 @@ class TiffTreeFilterProxyModel(QSortFilterProxyModel):
 
     @staticmethod
     def _is_under(path: str, parent: str) -> bool:
+        try:
+            return os.path.commonpath([path, parent]) == parent and path != parent
+        except ValueError:
+            return False
+
+    @staticmethod
+    def _is_under_or_equal(path: str, parent: str) -> bool:
         try:
             return os.path.commonpath([path, parent]) == parent
         except ValueError:
@@ -187,6 +211,7 @@ class MainWindow(QMainWindow):
         self.tree_root_path: Optional[str] = None
         self.opened_files: Set[str] = set()
         self.opened_folders: Set[str] = set()
+        self.excluded_paths: Set[str] = set()
         self.active_file_path: Optional[str] = None
 
         # Image state
@@ -233,7 +258,7 @@ class MainWindow(QMainWindow):
             self.btn_close.setPopupMode(QToolButton.MenuButtonPopup)
         self.btn_close.clicked.connect(self.close_current_entry)
         self.close_dropdown = QMenu(self.btn_close)
-        self.close_dropdown.addAction("Close Current", self.close_current_entry)
+        self.close_dropdown.addAction("Close Selected", self.close_current_entry)
         self.close_dropdown.addAction("Close All", self.close_all_entries)
         self.btn_close.setMenu(self.close_dropdown)
         top.addWidget(self.btn_close)
@@ -565,32 +590,47 @@ class MainWindow(QMainWindow):
         self._update_roi_stats()
 
         normalized_paths = {os.path.abspath(path) for path in paths}
-        removed_folders = {path for path in normalized_paths if os.path.isdir(path)}
-        removed_files = {path for path in normalized_paths if os.path.isfile(path)}
         current_path = self.active_file_path
 
+        # Explicitly remove from opened sets if they exist there
         explicit_files_to_remove = {
             path
             for path in self.opened_files
-            if path in removed_files
-            or any(self._is_under(path, folder) for folder in removed_folders)
+            if any(self._is_under_or_equal(path, p) for p in normalized_paths)
         }
         folder_roots_to_remove = {
             folder
             for folder in self.opened_folders
-            if folder in removed_folders
-            or any(self._is_under(folder, parent) for parent in removed_folders)
+            if any(self._is_under_or_equal(folder, p) for p in normalized_paths)
         }
+
+        # Any path that isn't a direct root but is being closed gets added to exclusions
+        # if it's currently visible.
+        new_exclusions = set()
+        for path in normalized_paths:
+            # If it's a sub-path of something already opened, exclude it
+            if any(
+                self._is_under(path, folder) for folder in self.opened_folders
+            ) or any(self._is_under(path, f) for f in self.opened_files):
+                new_exclusions.add(path)
 
         self.opened_files.difference_update(explicit_files_to_remove)
         self.opened_folders.difference_update(folder_roots_to_remove)
+        self.excluded_paths.update(new_exclusions)
+
+        # Optimization: Cleanup exclusions that are no longer relevant
+        # (i.e. if their parent folder/file was also removed from opened sets)
+        self.excluded_paths = {
+            ex
+            for ex in self.excluded_paths
+            if any(self._is_under(ex, opened) for opened in self.opened_folders)
+            or any(self._is_under(ex, opened) for opened in self.opened_files)
+        }
 
         affected_files = {
             path
             for path in list(self.rois_by_file.keys())
-            if path in removed_files
-            or any(self._is_under(path, folder) for folder in removed_folders)
-            or any(self._is_under(path, folder) for folder in folder_roots_to_remove)
+            if any(self._is_under_or_equal(path, p) for p in normalized_paths)
         }
         for path in affected_files:
             self.rois_by_file.pop(path, None)
@@ -598,6 +638,7 @@ class MainWindow(QMainWindow):
 
         if not self.opened_files and not self.opened_folders:
             self._clear_loaded_image("All files closed.")
+            self.excluded_paths.clear()
             self._rebuild_file_tree()
             return
 
@@ -625,6 +666,7 @@ class MainWindow(QMainWindow):
 
         self.opened_files.clear()
         self.opened_folders.clear()
+        self.excluded_paths.clear()
         self.rois_by_file.clear()
         self.selected_roi_by_file.clear()
         self._clear_loaded_image("")
@@ -1258,6 +1300,7 @@ class MainWindow(QMainWindow):
         self.file_proxy.set_sources(
             self.opened_files,
             self.opened_folders,
+            self.excluded_paths,
             self.tree_root_path,
             view_root_path,
         )
@@ -1413,9 +1456,18 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _is_under(path: str, parent: str) -> bool:
         try:
-            return os.path.commonpath(
-                [os.path.abspath(path), os.path.abspath(parent)]
-            ) == os.path.abspath(parent)
+            p = os.path.abspath(path)
+            par = os.path.abspath(parent)
+            return os.path.commonpath([p, par]) == par and p != par
+        except ValueError:
+            return False
+
+    @staticmethod
+    def _is_under_or_equal(path: str, parent: str) -> bool:
+        try:
+            p = os.path.abspath(path)
+            par = os.path.abspath(parent)
+            return os.path.commonpath([p, par]) == par
         except ValueError:
             return False
 

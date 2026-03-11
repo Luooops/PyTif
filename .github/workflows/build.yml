@@ -13,7 +13,6 @@ jobs:
           - os: macos-latest
             artifact_path: dist/*.dmg
           - os: ubuntu-latest
-            # PyInstaller on Linux usually produces a file with no extension
             artifact_path: dist/PyTif
     
     steps:
