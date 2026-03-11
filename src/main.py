@@ -2,11 +2,19 @@ import os
 import copy
 import json
 import sys
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 import numpy as np
 import tifffile
-from PySide6.QtCore import Qt, QSize, QSettings, QPointF
+from PySide6.QtCore import (
+    Qt,
+    QSize,
+    QSettings,
+    QPointF,
+    QDir,
+    QModelIndex,
+    QSortFilterProxyModel,
+)
 from PySide6.QtGui import (
     QPixmap,
     QIcon,
@@ -20,6 +28,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
+    QFileSystemModel,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -36,6 +45,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QButtonGroup,
     QFormLayout,
+    QTreeView,
 )
 
 from utils import (
@@ -48,6 +58,109 @@ from widgets import ImageViewer, DraggablePanel, ROIListWindow
 from roi import roi_geometry, roi_mask, serialize_roi_geometry
 
 SUPPORTED_EXTS = (".tif", ".tiff")
+
+
+class TiffTreeFilterProxyModel(QSortFilterProxyModel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._opened_files: Set[str] = set()
+        self._opened_folders: Set[str] = set()
+        self._root_path: Optional[str] = None
+        self._dir_match_cache: Dict[str, bool] = {}
+        self.setRecursiveFilteringEnabled(True)
+        self.setDynamicSortFilter(True)
+
+    def set_sources(
+        self,
+        opened_files: Set[str],
+        opened_folders: Set[str],
+        root_path: Optional[str],
+    ):
+        self._opened_files = {self._norm_path(path) for path in opened_files}
+        self._opened_folders = {self._norm_path(path) for path in opened_folders}
+        self._root_path = self._norm_path(root_path) if root_path else None
+        self._dir_match_cache.clear()
+        self.invalidate()
+
+    def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
+        model = self.sourceModel()
+        if model is None or self._root_path is None:
+            return False
+
+        index = model.index(source_row, 0, source_parent)
+        if not index.isValid():
+            return False
+
+        path = self._norm_path(model.filePath(index))
+        if path == self._root_path:
+            return True
+        if not self._is_under(path, self._root_path):
+            return False
+        if model.isDir(index):
+            return self._directory_matches(path)
+        return self._file_matches(path)
+
+    def lessThan(self, source_left: QModelIndex, source_right: QModelIndex) -> bool:
+        model = self.sourceModel()
+        if model is None:
+            return False
+
+        left_is_dir = model.isDir(source_left)
+        right_is_dir = model.isDir(source_right)
+        if left_is_dir != right_is_dir:
+            return left_is_dir
+        return natural_key(model.fileName(source_left)) < natural_key(
+            model.fileName(source_right)
+        )
+
+    def _file_matches(self, path: str) -> bool:
+        if not path.lower().endswith(SUPPORTED_EXTS):
+            return False
+        if path in self._opened_files:
+            return True
+        return any(self._is_under(path, folder) for folder in self._opened_folders)
+
+    def _directory_matches(self, path: str) -> bool:
+        candidates = self._opened_files | self._opened_folders
+        if any(self._is_under(candidate, path) for candidate in candidates):
+            return True
+        if any(self._is_under(path, folder) for folder in self._opened_folders):
+            return self._directory_has_matches(path)
+        return False
+
+    def _directory_has_matches(self, path: str) -> bool:
+        cached = self._dir_match_cache.get(path)
+        if cached is not None:
+            return cached
+
+        try:
+            with os.scandir(path) as entries:
+                for entry in entries:
+                    entry_path = self._norm_path(entry.path)
+                    if entry.is_dir(follow_symlinks=False):
+                        if self._directory_matches(entry_path):
+                            self._dir_match_cache[path] = True
+                            return True
+                    elif self._file_matches(entry_path):
+                        self._dir_match_cache[path] = True
+                        return True
+        except OSError:
+            self._dir_match_cache[path] = False
+            return False
+
+        self._dir_match_cache[path] = False
+        return False
+
+    @staticmethod
+    def _norm_path(path: str) -> str:
+        return os.path.normcase(os.path.abspath(path))
+
+    @staticmethod
+    def _is_under(path: str, parent: str) -> bool:
+        try:
+            return os.path.commonpath([path, parent]) == parent
+        except ValueError:
+            return False
 
 
 # -------------------------
@@ -63,9 +176,11 @@ class MainWindow(QMainWindow):
         self.settings = QSettings("PyTIF", "Viewer")
 
         # Navigation state
-        self.root_folder: Optional[str] = None  # root of current browsing context
-        self.current_folder: Optional[str] = None  # currently displayed folder
-        self.entries: List[Tuple[str, str]] = []  # ("up"/"dir"/"tif", path)
+        self.current_folder: Optional[str] = None
+        self.tree_root_path: Optional[str] = None
+        self.opened_files: Set[str] = set()
+        self.opened_folders: Set[str] = set()
+        self.active_file_path: Optional[str] = None
 
         # Image state
         self.loaded: Optional[np.ndarray] = None  # (H,W) or (S,H,W)
@@ -123,18 +238,30 @@ class MainWindow(QMainWindow):
         self.splitter = QSplitter(Qt.Horizontal)
         layout.addWidget(self.splitter, 1)
 
-        self.list_widget = QListWidget()
-        self.list_widget.setStyleSheet(
-            "QListWidget::item:selected { background-color: #3d5a80; color: white; }"
-            "QListWidget::item:selected:!active { background-color: #3d5a80; color: white; }"
+        self.file_model = QFileSystemModel(self)
+        self.file_model.setFilter(QDir.AllDirs | QDir.Files | QDir.NoDotAndDotDot)
+        self.file_model.setRootPath("")
+
+        self.file_proxy = TiffTreeFilterProxyModel(self)
+        self.file_proxy.setSourceModel(self.file_model)
+
+        self.tree_view = QTreeView()
+        self.tree_view.setStyleSheet(
+            "QTreeView::item:selected { background-color: #3d5a80; color: white; }"
+            "QTreeView::item:selected:!active { background-color: #3d5a80; color: white; }"
         )
-        self.list_widget.setSelectionMode(QListWidget.ExtendedSelection)
-        self.list_widget.setDragDropMode(QListWidget.InternalMove)
-        self.list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.list_widget.customContextMenuRequested.connect(self.on_list_context_menu)
-        self.list_widget.currentRowChanged.connect(self.on_entry_selected)
-        self.list_widget.itemDoubleClicked.connect(self.on_item_double_clicked)
-        self.splitter.addWidget(self.list_widget)
+        self.tree_view.setModel(self.file_proxy)
+        self.tree_view.setHeaderHidden(True)
+        self.tree_view.setSortingEnabled(True)
+        self.tree_view.sortByColumn(0, Qt.AscendingOrder)
+        self.tree_view.setSelectionMode(QTreeView.ExtendedSelection)
+        self.tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree_view.customContextMenuRequested.connect(self.on_tree_context_menu)
+        self.tree_view.doubleClicked.connect(self.on_tree_double_clicked)
+        self.tree_view.selectionModel().currentChanged.connect(
+            self.on_tree_current_changed
+        )
+        self.splitter.addWidget(self.tree_view)
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
@@ -351,31 +478,34 @@ class MainWindow(QMainWindow):
             self.add_files(paths)
 
     def add_files(self, paths: List[str], auto_load: bool = True):
-        existing = {os.path.abspath(p) for typ, p in self.entries if typ == "tif"}
-        added_indices: List[int] = []
+        new_paths: List[str] = []
         for p in paths:
             ap = os.path.abspath(p)
             if not os.path.isfile(ap):
                 continue
             if not ap.lower().endswith(SUPPORTED_EXTS):
                 continue
-            if ap in existing:
+            if ap in self.opened_files:
                 continue
-            self.entries.append(("tif", ap))
-            item = QListWidgetItem(os.path.basename(ap))
-            item.setToolTip(ap)
-            self.list_widget.addItem(item)
-            added_indices.append(self.list_widget.count() - 1)
-            existing.add(ap)
+            if any(self._is_under(ap, folder) for folder in self.opened_folders):
+                continue
+            self.opened_files.add(ap)
+            new_paths.append(ap)
 
-        if not added_indices:
+        if not new_paths:
             self.status.setText("No new TIFF files were added.")
             return
 
+        self.current_folder = os.path.dirname(new_paths[0])
+        self._rebuild_file_tree(
+            preserve_selection=self.active_file_path or new_paths[0]
+        )
+
         if auto_load and self.loaded is None:
-            self.list_widget.setCurrentRow(added_indices[0])
+            self._select_tree_path(new_paths[0])
+            self.load_tiff(new_paths[0])
         else:
-            self.status.setText(f"Added {len(added_indices)} file(s).")
+            self.status.setText(f"Added {len(new_paths)} file(s).")
 
     def open_folder_dialog(self):
         start = self.current_folder or os.path.expanduser("~")
@@ -401,106 +531,74 @@ class MainWindow(QMainWindow):
 
     # ---------------- Close Logic ----------------
     def close_current_entry(self):
-        row = self.list_widget.currentRow()
-        if row < 0 or row >= len(self.entries):
+        path = self._path_from_proxy_index(self.tree_view.currentIndex())
+        if not path:
+            path = self.active_file_path
+        if not path:
             return
-        self.close_entries_by_indices([row])
+        self.close_entries_by_paths([path])
 
     def close_selected_entries(self):
-        items = self.list_widget.selectedItems()
-        if not items:
+        paths = self._selected_tree_paths()
+        if not paths:
             return
-        indices = sorted([self.list_widget.row(item) for item in items], reverse=True)
-        self.close_entries_by_indices(indices)
+        self.close_entries_by_paths(paths)
 
-    def close_entries_by_indices(self, indices: List[int]):
+    def close_entries_by_paths(self, paths: List[str]):
         # Ensure latest state is reflected in sidebar before closing
         self._refresh_roi_list()
         self._update_roi_stats()
 
-        # indices should be sorted descending to avoid index shift issues
-        indices = sorted(indices, reverse=True)
+        normalized_paths = {os.path.abspath(path) for path in paths}
+        removed_folders = {path for path in normalized_paths if os.path.isdir(path)}
+        removed_files = {path for path in normalized_paths if os.path.isfile(path)}
+        current_path = self.active_file_path
 
-        currently_viewed_path = self._current_tif_name()
+        explicit_files_to_remove = {
+            path
+            for path in self.opened_files
+            if path in removed_files
+            or any(self._is_under(path, folder) for folder in removed_folders)
+        }
+        folder_roots_to_remove = {
+            folder
+            for folder in self.opened_folders
+            if folder in removed_folders
+            or any(self._is_under(folder, parent) for parent in removed_folders)
+        }
 
-        # Expand indices to include all children if a directory is selected
-        all_to_remove = set()
-        for idx in indices:
-            if idx < 0 or idx >= len(self.entries):
-                continue
-            all_to_remove.add(idx)
-            typ, path = self.entries[idx]
-            if typ == "dir":
-                # Check all subsequent entries. Since they are ordered by folder scans,
-                # any file or subfolder belonging to this folder will follow it.
-                next_idx = idx + 1
-                while next_idx < len(self.entries):
-                    next_typ, next_path = self.entries[next_idx]
-                    # If it's a file inside this dir or a subfolder inside this dir
-                    if next_path.startswith(path):
-                        all_to_remove.add(next_idx)
-                    else:
-                        # Once we hit an entry that isn't inside, we can stop
-                        # (assuming self.entries is strictly ordered by path traversal)
-                        break
-                    next_idx += 1
+        self.opened_files.difference_update(explicit_files_to_remove)
+        self.opened_folders.difference_update(folder_roots_to_remove)
 
-        # Sort descending to remove without affecting other indices
-        sorted_removal = sorted(list(all_to_remove), reverse=True)
-
-        for row in sorted_removal:
-            # Remove from list widget and entries
-            self.list_widget.takeItem(row)
-            _, path = self.entries.pop(row)
-
-            # Clear ROIs for this file if it was a tif
+        affected_files = {
+            path
+            for path in list(self.rois_by_file.keys())
+            if path in removed_files
+            or any(self._is_under(path, folder) for folder in removed_folders)
+            or any(self._is_under(path, folder) for folder in folder_roots_to_remove)
+        }
+        for path in affected_files:
             self.rois_by_file.pop(path, None)
             self.selected_roi_by_file.pop(path, None)
 
-        # Remove empty directory headers (cleanup)
-        row = 0
-        while row < self.list_widget.count():
-            typ, path = self.entries[row]
-            if typ == "dir":
-                # Check if it has any children remaining
-                is_empty = True
-                if row + 1 < len(self.entries):
-                    next_typ, next_path = self.entries[row + 1]
-                    if next_path.startswith(path):
-                        is_empty = False
+        if not self.opened_files and not self.opened_folders:
+            self._clear_loaded_image("All files closed.")
+            self._rebuild_file_tree()
+            return
 
-                if is_empty:
-                    self.list_widget.takeItem(row)
-                    self.entries.pop(row)
-                    continue
-            row += 1
-
-        # If we just closed the currently loaded image, clear viewer or load next
-        if self.list_widget.count() == 0:
-            self.loaded = None
-            self.total_slices = 1
-            self.viewer.set_image(QPixmap())
-            self.slice_controls.hide()
-            self.status.setText("All files closed.")
-        else:
-            # Check if currently viewed was closed
-            still_around = any(
-                path == currently_viewed_path for typ, path in self.entries
+        self._rebuild_file_tree(
+            preserve_selection=(
+                current_path if self._path_is_visible(current_path) else None
             )
-            if not still_around:
-                # Selection index likely shifted. Deselect everything in the list widget
-                # so the user can click a new file to trigger selection change/load.
-                self.list_widget.blockSignals(True)
-                self.list_widget.setCurrentRow(-1)
-                self.list_widget.clearSelection()
-                self.list_widget.blockSignals(False)
+        )
 
-                self.loaded = None
-                self.viewer.set_image(QPixmap())
-                self.slice_controls.hide()
-                self._refresh_roi_list()
-                self._update_roi_stats()
-            # Otherwise keep current
+        if current_path and not self._path_is_visible(current_path):
+            self._clear_loaded_image("")
+            self.tree_view.clearSelection()
+            return
+
+        if current_path:
+            self._select_tree_path(current_path)
 
     def close_all_entries(self):
         # Ensure latest state is reflected in sidebar before closing
@@ -510,15 +608,12 @@ class MainWindow(QMainWindow):
         self.status.setText("Closing all files...")
         QApplication.processEvents()
 
-        self.list_widget.clear()
-        self.entries.clear()
+        self.opened_files.clear()
+        self.opened_folders.clear()
         self.rois_by_file.clear()
         self.selected_roi_by_file.clear()
-        self.loaded = None
-        self.total_slices = 1
-        self.viewer.set_image(QPixmap())
-        self.viewer.set_rois([], None)
-        self.slice_controls.hide()
+        self._clear_loaded_image("")
+        self._rebuild_file_tree()
         self._refresh_roi_list()
         self._update_roi_stats()
         self.status.setText("All files closed.")
@@ -531,87 +626,43 @@ class MainWindow(QMainWindow):
         self.status.setText(f"Scanning {os.path.basename(folder)} for TIFF files...")
         QApplication.processEvents()
 
-        found_folders = []
-        for root, dirs, files in os.walk(folder):
-            tif_files = [f for f in files if f.lower().endswith(SUPPORTED_EXTS)]
-            if tif_files:
-                found_folders.append(root)
-
-        if not found_folders:
+        first_tif = self._find_first_tif_path(folder)
+        if not first_tif:
             self.status.setText(
                 f"No TIFF files found in {folder} or its subdirectories."
             )
             return
 
-        # Sort folders naturally
-        found_folders.sort(key=natural_key)
+        self.opened_folders.add(folder)
+        self._rebuild_file_tree(preserve_selection=self.active_file_path)
+        self.status.setText(f"Opened folder: {os.path.basename(folder)}")
 
-        for fld in found_folders:
-            # Add a directory entry to the list
-            rel_path = os.path.relpath(fld, os.path.dirname(folder))
-            display_name = f"[{rel_path}]"
-
-            self.entries.append(("dir", fld))
-            item = QListWidgetItem(display_name)
-            item.setToolTip(fld)
-            # item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
-            font = item.font()
-            font.setBold(True)
-            item.setFont(font)
-            self.list_widget.addItem(item)
-
-            # Add the files within this folder
-            try:
-                names = sorted(
-                    [
-                        n
-                        for n in os.listdir(fld)
-                        if os.path.isfile(os.path.join(fld, n))
-                        and n.lower().endswith(SUPPORTED_EXTS)
-                    ],
-                    key=natural_key,
-                )
-            except Exception:
-                continue
-
-            for n in names:
-                ap = os.path.join(fld, n)
-                self.entries.append(("tif", ap))
-                file_item = QListWidgetItem(f"  {n}")
-                file_item.setToolTip(ap)
-                self.list_widget.addItem(file_item)
-
-        self.status.setText(f"Found {len(found_folders)} folder(s) containing TIFFs.")
-
-    def on_item_double_clicked(self, item: QListWidgetItem):
-        row = self.list_widget.row(item)
-        if row < 0 or row >= len(self.entries):
-            return
-
-        typ, path = self.entries[row]
-        if typ == "tif":
+    def on_tree_double_clicked(self, index: QModelIndex):
+        path = self._path_from_proxy_index(index)
+        if path and os.path.isfile(path) and path.lower().endswith(SUPPORTED_EXTS):
             self.load_tiff(path)
 
-    def on_list_context_menu(self, pos):
-        item = self.list_widget.itemAt(pos)
-        selected_items = self.list_widget.selectedItems()
-        if not selected_items:
+    def on_tree_context_menu(self, pos):
+        index = self.tree_view.indexAt(pos)
+        selected_paths = self._selected_tree_paths()
+        if not index.isValid() or not selected_paths:
             return
 
         menu = QMenu()
-        close_action = menu.addAction(f"Close Selected ({len(selected_items)})")
+        close_action = menu.addAction(f"Close Selected ({len(selected_paths)})")
         close_action.triggered.connect(self.close_selected_entries)
-        menu.exec(self.list_widget.viewport().mapToGlobal(pos))
+        menu.exec(self.tree_view.viewport().mapToGlobal(pos))
 
-    def on_entry_selected(self, row: int):
-        if row < 0 or row >= len(self.entries):
+    def on_tree_current_changed(self, current: QModelIndex, previous: QModelIndex):
+        path = self._path_from_proxy_index(current)
+        if path and path == self.active_file_path:
             return
-        typ, path = self.entries[row]
-        if typ == "tif":
+        if path and os.path.isfile(path) and path.lower().endswith(SUPPORTED_EXTS):
             self.load_tiff(path)
 
     # ---------------- TIFF load/render ----------------
     def load_tiff(self, path: str):
+        path = os.path.abspath(path)
         self.status.setText(f"Loading {os.path.basename(path)}...")
         QApplication.processEvents()
 
@@ -626,6 +677,7 @@ class MainWindow(QMainWindow):
         self.loaded = flat
         self.total_slices = slices
         self.current_slice = 0
+        self.active_file_path = path
 
         if slices > 1:
             self.slice_controls.show()
@@ -645,16 +697,11 @@ class MainWindow(QMainWindow):
         self._render(fit=True)
         self._apply_rois_for_current_file()
         self._update_roi_stats()
-        self._update_slice_info(path)
 
         # Clear the "Loading..." status after everything is done
         self.status.setText("")
-        if self.current_folder:
-            self.status.setText(
-                f"Folder: {self.current_folder} | {os.path.basename(path)}"
-            )
-        else:
-            self.status.setText(os.path.basename(path))
+        self._select_tree_path(path)
+        self._update_slice_info(path)
 
     def _update_slice_info(self, path: str):
         name = os.path.basename(path)
@@ -665,8 +712,9 @@ class MainWindow(QMainWindow):
         else:
             self.slice_info.setText(f"{name} — 2D")
 
-        if self.current_folder:
-            self.status.setText(f"Folder: {self.current_folder}  |  {name}")
+        display_root = self.tree_root_path or self.current_folder
+        if display_root:
+            self.status.setText(f"Folder: {display_root}  |  {name}")
 
     def _render(self, fit: bool = False):
         if self.loaded is None:
@@ -701,18 +749,15 @@ class MainWindow(QMainWindow):
         self.slice_slider.setValue(int(v) - 1)
 
     def _current_tif_name(self) -> str:
-        row = self.list_widget.currentRow()
-        if 0 <= row < len(self.entries) and self.entries[row][0] == "tif":
-            return self.entries[row][1]
-        return ""
+        return self.active_file_path or ""
 
     # ---------------- Sidebar ----------------
     def toggle_sidebar(self):
-        if self.list_widget.isVisible():
-            self.list_widget.hide()
+        if self.tree_view.isVisible():
+            self.tree_view.hide()
             self.btn_sidebar.setText("Show Sidebar")
         else:
-            self.list_widget.show()
+            self.tree_view.show()
             self.btn_sidebar.setText("Hide Sidebar")
 
     # ---------------- Zoom helpers ----------------
@@ -816,10 +861,7 @@ class MainWindow(QMainWindow):
         )
 
     def _current_file_path(self) -> Optional[str]:
-        row = self.list_widget.currentRow()
-        if 0 <= row < len(self.entries) and self.entries[row][0] == "tif":
-            return os.path.abspath(self.entries[row][1])
-        return None
+        return self.active_file_path
 
     def _on_viewer_rois_changed(
         self, rois: List[Dict[str, Any]], selected_idx: Optional[int]
@@ -1181,19 +1223,173 @@ class MainWindow(QMainWindow):
             self._show_roi_panel()
 
     def _move_to_prev_next_tif(self, delta: int):
-        if not self.entries:
+        paths = self._visible_tif_paths()
+        if not paths or not self.active_file_path:
             return
-        cur = self.list_widget.currentRow()
-        if cur < 0:
+        try:
+            current_index = paths.index(self.active_file_path)
+        except ValueError:
             return
-        idx = cur
-        while True:
-            idx += delta
-            if idx < 0 or idx >= len(self.entries):
-                break
-            if self.entries[idx][0] == "tif":
-                self.list_widget.setCurrentRow(idx)
-                break
+        new_index = max(0, min(len(paths) - 1, current_index + delta))
+        if new_index == current_index:
+            return
+        path = paths[new_index]
+        self._select_tree_path(path)
+        self.load_tiff(path)
+
+    def _rebuild_file_tree(self, preserve_selection: Optional[str] = None):
+        self.tree_root_path = self._compute_tree_root_path()
+        self.file_proxy.set_sources(
+            self.opened_files,
+            self.opened_folders,
+            self.tree_root_path,
+        )
+
+        if not self.tree_root_path:
+            self.tree_view.setRootIndex(QModelIndex())
+            self.tree_view.clearSelection()
+            return
+
+        source_root = self.file_model.index(self.tree_root_path)
+        proxy_root = self.file_proxy.mapFromSource(source_root)
+        self.tree_view.setRootIndex(proxy_root)
+        for column in range(1, self.file_model.columnCount()):
+            self.tree_view.hideColumn(column)
+        self.tree_view.expand(proxy_root)
+
+        selected_path = preserve_selection or self.active_file_path
+        if selected_path and self._path_is_visible(selected_path):
+            self._select_tree_path(selected_path)
+        else:
+            self.tree_view.clearSelection()
+
+    def _compute_tree_root_path(self) -> Optional[str]:
+        candidates: List[str] = []
+        candidates.extend(self.opened_folders)
+        candidates.extend(os.path.dirname(path) for path in self.opened_files)
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0]
+        try:
+            return os.path.commonpath(candidates)
+        except ValueError:
+            drive, _ = os.path.splitdrive(candidates[0])
+            return drive + os.sep if drive else os.sep
+
+    def _select_tree_path(self, path: Optional[str]):
+        if not path or not self.tree_root_path:
+            return
+        source_index = self.file_model.index(path)
+        proxy_index = self.file_proxy.mapFromSource(source_index)
+        if not proxy_index.isValid():
+            return
+        selection_model = self.tree_view.selectionModel()
+        if selection_model is not None:
+            selection_model.blockSignals(True)
+        self.tree_view.setCurrentIndex(proxy_index)
+        self.tree_view.scrollTo(proxy_index)
+        if selection_model is not None:
+            selection_model.blockSignals(False)
+
+    def _path_from_proxy_index(self, index: QModelIndex) -> Optional[str]:
+        if not index.isValid():
+            return None
+        source_index = self.file_proxy.mapToSource(index)
+        if not source_index.isValid():
+            return None
+        path = self.file_model.filePath(source_index)
+        return os.path.abspath(path) if path else None
+
+    def _selected_tree_paths(self) -> List[str]:
+        selection_model = self.tree_view.selectionModel()
+        if selection_model is None:
+            return []
+        paths = []
+        seen = set()
+        for index in selection_model.selectedRows(0):
+            path = self._path_from_proxy_index(index)
+            if path and path not in seen:
+                seen.add(path)
+                paths.append(path)
+        return paths
+
+    def _path_is_visible(self, path: Optional[str]) -> bool:
+        if not path or not self.tree_root_path:
+            return False
+        normalized = os.path.abspath(path)
+        if os.path.isdir(normalized):
+            return any(
+                self._is_under(normalized, folder) or self._is_under(folder, normalized)
+                for folder in self.opened_folders
+            ) or any(
+                self._is_under(file_path, normalized) for file_path in self.opened_files
+            )
+        if not normalized.lower().endswith(SUPPORTED_EXTS):
+            return False
+        return normalized in self.opened_files or any(
+            self._is_under(normalized, folder) for folder in self.opened_folders
+        )
+
+    def _visible_tif_paths(self) -> List[str]:
+        if not self.tree_root_path:
+            return []
+
+        source_root = self.file_model.index(self.tree_root_path)
+        if self.file_model.canFetchMore(source_root):
+            self.file_model.fetchMore(source_root)
+        proxy_root = self.file_proxy.mapFromSource(source_root)
+        paths: List[str] = []
+
+        def walk(parent: QModelIndex):
+            row_count = self.file_proxy.rowCount(parent)
+            for row in range(row_count):
+                index = self.file_proxy.index(row, 0, parent)
+                source_index = self.file_proxy.mapToSource(index)
+                if self.file_model.isDir(source_index):
+                    if self.file_model.canFetchMore(source_index):
+                        self.file_model.fetchMore(source_index)
+                    walk(index)
+                    continue
+                path = self._path_from_proxy_index(index)
+                if path and path.lower().endswith(SUPPORTED_EXTS):
+                    paths.append(path)
+
+        walk(proxy_root)
+        return paths
+
+    def _find_first_tif_path(self, folder: str) -> Optional[str]:
+        for root, dirs, files in os.walk(folder):
+            dirs.sort(key=natural_key)
+            tif_names = sorted(
+                [name for name in files if name.lower().endswith(SUPPORTED_EXTS)],
+                key=natural_key,
+            )
+            if tif_names:
+                return os.path.join(root, tif_names[0])
+        return None
+
+    @staticmethod
+    def _is_under(path: str, parent: str) -> bool:
+        try:
+            return os.path.commonpath(
+                [os.path.abspath(path), os.path.abspath(parent)]
+            ) == os.path.abspath(parent)
+        except ValueError:
+            return False
+
+    def _clear_loaded_image(self, status_text: str):
+        self.loaded = None
+        self.total_slices = 1
+        self.current_slice = 0
+        self.active_file_path = None
+        self.viewer.set_image(QPixmap())
+        self.viewer.set_rois([], None)
+        self.slice_controls.hide()
+        self._refresh_roi_list()
+        self._update_roi_stats()
+        if status_text:
+            self.status.setText(status_text)
 
 
 def main():
