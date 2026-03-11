@@ -66,6 +66,7 @@ class TiffTreeFilterProxyModel(QSortFilterProxyModel):
         self._opened_files: Set[str] = set()
         self._opened_folders: Set[str] = set()
         self._root_path: Optional[str] = None
+        self._view_root_path: Optional[str] = None
         self._dir_match_cache: Dict[str, bool] = {}
         self.setRecursiveFilteringEnabled(True)
         self.setDynamicSortFilter(True)
@@ -75,10 +76,14 @@ class TiffTreeFilterProxyModel(QSortFilterProxyModel):
         opened_files: Set[str],
         opened_folders: Set[str],
         root_path: Optional[str],
+        view_root_path: Optional[str],
     ):
         self._opened_files = {self._norm_path(path) for path in opened_files}
         self._opened_folders = {self._norm_path(path) for path in opened_folders}
         self._root_path = self._norm_path(root_path) if root_path else None
+        self._view_root_path = (
+            self._norm_path(view_root_path) if view_root_path else None
+        )
         self._dir_match_cache.clear()
         self.invalidate()
 
@@ -92,6 +97,8 @@ class TiffTreeFilterProxyModel(QSortFilterProxyModel):
             return False
 
         path = self._norm_path(model.filePath(index))
+        if path == self._view_root_path:
+            return True
         if path == self._root_path:
             return True
         if not self._is_under(path, self._root_path):
@@ -1239,10 +1246,12 @@ class MainWindow(QMainWindow):
 
     def _rebuild_file_tree(self, preserve_selection: Optional[str] = None):
         self.tree_root_path = self._compute_tree_root_path()
+        view_root_path = self._compute_tree_view_root_path()
         self.file_proxy.set_sources(
             self.opened_files,
             self.opened_folders,
             self.tree_root_path,
+            view_root_path,
         )
 
         if not self.tree_root_path:
@@ -1250,12 +1259,14 @@ class MainWindow(QMainWindow):
             self.tree_view.clearSelection()
             return
 
-        source_root = self.file_model.index(self.tree_root_path)
+        source_root = self.file_model.index(view_root_path)
         proxy_root = self.file_proxy.mapFromSource(source_root)
         self.tree_view.setRootIndex(proxy_root)
         for column in range(1, self.file_model.columnCount()):
             self.tree_view.hideColumn(column)
         self.tree_view.expand(proxy_root)
+        if view_root_path != self.tree_root_path:
+            self._expand_tree_path(self.tree_root_path)
 
         selected_path = preserve_selection or self.active_file_path
         if selected_path and self._path_is_visible(selected_path):
@@ -1277,9 +1288,17 @@ class MainWindow(QMainWindow):
             drive, _ = os.path.splitdrive(candidates[0])
             return drive + os.sep if drive else os.sep
 
+    def _compute_tree_view_root_path(self) -> str:
+        if len(self.opened_folders) == 1 and not self.opened_files:
+            folder = next(iter(self.opened_folders))
+            parent = os.path.dirname(folder)
+            return parent or folder
+        return self.tree_root_path or ""
+
     def _select_tree_path(self, path: Optional[str]):
         if not path or not self.tree_root_path:
             return
+        self._expand_tree_path(path)
         source_index = self.file_model.index(path)
         proxy_index = self.file_proxy.mapFromSource(source_index)
         if not proxy_index.isValid():
@@ -1291,6 +1310,20 @@ class MainWindow(QMainWindow):
         self.tree_view.scrollTo(proxy_index)
         if selection_model is not None:
             selection_model.blockSignals(False)
+
+    def _expand_tree_path(self, path: Optional[str]):
+        if not path:
+            return
+        current_path = os.path.abspath(path)
+        while current_path:
+            source_index = self.file_model.index(current_path)
+            proxy_index = self.file_proxy.mapFromSource(source_index)
+            if proxy_index.isValid():
+                self.tree_view.expand(proxy_index)
+            parent_path = os.path.dirname(current_path)
+            if parent_path == current_path:
+                break
+            current_path = parent_path
 
     def _path_from_proxy_index(self, index: QModelIndex) -> Optional[str]:
         if not index.isValid():
