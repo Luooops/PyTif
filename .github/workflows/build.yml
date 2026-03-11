@@ -16,6 +16,11 @@ jobs:
         run: uv sync
       - name: Build with PyInstaller
         run: uv run pyinstaller PyTif.spec
+      - name: Create DMG (macOS only)
+        if: matrix.os == 'macos-latest'
+        run: |
+          uv pip install dmgbuild
+          uv run dmgbuild -s .github/workflows/dmg_settings.py "PyTif" dist/PyTif.dmg
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:

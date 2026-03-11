@@ -39,3 +39,12 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
+
+import sys
+if sys.platform == 'darwin':
+    app = BUNDLE(
+        exe,
+        name='PyTif.app',
+        icon=None,
+        bundle_identifier='com.pytif.app',
+    )
