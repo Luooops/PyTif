@@ -213,7 +213,7 @@ class MainWindow(QMainWindow):
         # File dropdown button
         self.btn_file = QToolButton()
         self.btn_file.setText("Open")
-        self.btn_file.setPopupMode(QToolButton.MenuButtonPopup)
+        self.btn_file.setPopupMode(QToolButton.InstantPopup)
         self.btn_file.clicked.connect(self.open_file_dialog)
         self.file_dropdown = QMenu(self.btn_file)
         self.file_dropdown.addAction("Open File(s)", self.open_file_dialog)
@@ -224,7 +224,7 @@ class MainWindow(QMainWindow):
         # Close dropdown button
         self.btn_close = QToolButton()
         self.btn_close.setText("Close")
-        self.btn_close.setPopupMode(QToolButton.MenuButtonPopup)
+        self.btn_close.setPopupMode(QToolButton.InstantPopup)
         self.btn_close.clicked.connect(self.close_current_entry)
         self.close_dropdown = QMenu(self.btn_close)
         self.close_dropdown.addAction("Close Current", self.close_current_entry)

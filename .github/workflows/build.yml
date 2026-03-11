@@ -9,9 +9,9 @@ jobs:
         os: [windows-latest, macos-latest, ubuntu-latest]
     
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
       - name: Install dependencies
         run: uv sync
       - name: Build with PyInstaller
@@ -22,7 +22,7 @@ jobs:
           uv pip install dmgbuild
           uv run dmgbuild -s .github/workflows/dmg_settings.py "PyTif" dist/PyTif.dmg
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: PyTIF-${{ matrix.os }}
           path: dist/
