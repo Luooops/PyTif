@@ -500,7 +500,9 @@ class MainWindow(QMainWindow):
             new_paths.append(ap)
 
         if not new_paths:
-            self.status.setText("No new TIFF files were added.")
+            self.status.setText(
+                "The selected file(s) are already opened or not valid TIFF files."
+            )
             return
 
         self.current_folder = os.path.dirname(new_paths[0])
