@@ -704,7 +704,7 @@ class MainWindow(QMainWindow):
         self._update_slice_info(path)
 
     def _update_slice_info(self, path: str):
-        name = os.path.basename(path)
+        name = path
         if self.total_slices > 1:
             self.slice_info.setText(
                 f"{name} — slice {self.current_slice + 1}/{self.total_slices}"
@@ -714,7 +714,7 @@ class MainWindow(QMainWindow):
 
         display_root = self.tree_root_path or self.current_folder
         if display_root:
-            self.status.setText(f"Folder: {display_root}  |  {name}")
+            self.status.setText(f"File: {name}")
 
     def _render(self, fit: bool = False):
         if self.loaded is None:
