@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 import math
 import copy
 
@@ -11,8 +11,6 @@ from PySide6.QtGui import (
     QPainterPath,
     QWheelEvent,
     QColor,
-    QPolygonF,
-    QIcon,
     QPixmap,
 )
 from PySide6.QtWidgets import (

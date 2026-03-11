@@ -36,12 +36,10 @@ from PySide6.QtWidgets import (
     QFrame,
     QButtonGroup,
     QFormLayout,
-    QProgressDialog,
 )
 
 from utils import (
     natural_key,
-    to_8bit_grayscale,
     numpy_to_qimage,
     flatten_to_slices,
     rgb_like_to_gray,
@@ -421,10 +419,32 @@ class MainWindow(QMainWindow):
 
         currently_viewed_path = self._current_tif_name()
 
-        for row in indices:
-            if row < 0 or row >= len(self.entries):
+        # Expand indices to include all children if a directory is selected
+        all_to_remove = set()
+        for idx in indices:
+            if idx < 0 or idx >= len(self.entries):
                 continue
+            all_to_remove.add(idx)
+            typ, path = self.entries[idx]
+            if typ == "dir":
+                # Check all subsequent entries. Since they are ordered by folder scans,
+                # any file or subfolder belonging to this folder will follow it.
+                next_idx = idx + 1
+                while next_idx < len(self.entries):
+                    next_typ, next_path = self.entries[next_idx]
+                    # If it's a file inside this dir or a subfolder inside this dir
+                    if next_path.startswith(path):
+                        all_to_remove.add(next_idx)
+                    else:
+                        # Once we hit an entry that isn't inside, we can stop
+                        # (assuming self.entries is strictly ordered by path traversal)
+                        break
+                    next_idx += 1
 
+        # Sort descending to remove without affecting other indices
+        sorted_removal = sorted(list(all_to_remove), reverse=True)
+
+        for row in sorted_removal:
             # Remove from list widget and entries
             self.list_widget.takeItem(row)
             _, path = self.entries.pop(row)
@@ -433,23 +453,21 @@ class MainWindow(QMainWindow):
             self.rois_by_file.pop(path, None)
             self.selected_roi_by_file.pop(path, None)
 
-        # Remove empty directory headers
+        # Remove empty directory headers (cleanup)
         row = 0
         while row < self.list_widget.count():
             typ, path = self.entries[row]
             if typ == "dir":
-                # Check if next item is a file within this directory or another directory
-                # If the next item is a 'tif', and its path starts with this dir, then it's not empty.
+                # Check if it has any children remaining
                 is_empty = True
                 if row + 1 < len(self.entries):
                     next_typ, next_path = self.entries[row + 1]
-                    if next_typ == "tif" and next_path.startswith(path):
+                    if next_path.startswith(path):
                         is_empty = False
 
                 if is_empty:
                     self.list_widget.takeItem(row)
                     self.entries.pop(row)
-                    # Don't increment row since we removed the current one
                     continue
             row += 1
 
