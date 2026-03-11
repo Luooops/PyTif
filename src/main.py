@@ -124,6 +124,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.splitter, 1)
 
         self.list_widget = QListWidget()
+        self.list_widget.setStyleSheet(
+            "QListWidget::item:selected { background-color: #3d5a80; color: white; }"
+            "QListWidget::item:selected:!active { background-color: #3d5a80; color: white; }"
+        )
         self.list_widget.setSelectionMode(QListWidget.ExtendedSelection)
         self.list_widget.setDragDropMode(QListWidget.InternalMove)
         self.list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -550,7 +554,7 @@ class MainWindow(QMainWindow):
             self.entries.append(("dir", fld))
             item = QListWidgetItem(display_name)
             item.setToolTip(fld)
-            item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
+            # item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
             font = item.font()
             font.setBold(True)
             item.setFont(font)
