@@ -7,6 +7,14 @@ jobs:
     strategy:
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
+        include:
+          - os: windows-latest
+            artifact_path: dist/*.exe
+          - os: macos-latest
+            artifact_path: dist/*.dmg
+          - os: ubuntu-latest
+            # PyInstaller on Linux usually produces a file with no extension
+            artifact_path: dist/PyTif
     
     steps:
       - uses: actions/checkout@v6
@@ -25,4 +33,4 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: PyTIF-${{ matrix.os }}
-          path: dist/
+          path: ${{ matrix.artifact_path }}
