@@ -139,6 +139,7 @@ class ImageViewer(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
 
         self._has_image = False
+        self._scale_calibration: Optional[Dict[str, Any]] = None
         self._min_zoom = 0.05
         self._max_zoom = 40.0
         self._pan_ema = QPointF(0.0, 0.0)
@@ -242,6 +243,7 @@ class ImageViewer(QGraphicsView):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_overlay_pos()
+        self.viewport().update()
 
     def set_image(self, pixmap: QPixmap, fit: bool = True):
         self._pix_item.setPixmap(pixmap)
@@ -255,6 +257,12 @@ class ImageViewer(QGraphicsView):
 
         if fit:
             self.fit_in_view()
+        else:
+            self.viewport().update()
+
+    def set_scale_calibration(self, calibration: Optional[Dict[str, Any]]):
+        self._scale_calibration = copy.deepcopy(calibration) if calibration else None
+        self.viewport().update()
 
     def fit_in_view(self):
         if not self._has_image:
@@ -262,6 +270,7 @@ class ImageViewer(QGraphicsView):
         self.resetTransform()
         self.fitInView(self._pix_item, Qt.KeepAspectRatio)
         self._clamp_zoom_to_limits()
+        self.viewport().update()
 
     def _current_zoom(self) -> float:
         return float(self.transform().m11())
@@ -284,6 +293,176 @@ class ImageViewer(QGraphicsView):
         target = max(self._min_zoom, min(self._max_zoom, cur * factor))
         actual = target / max(cur, 1e-12)
         self.scale(actual, actual)
+        self.viewport().update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        self._paint_scale_bar()
+
+    def _paint_scale_bar(self):
+        if not self._has_image or not self._scale_calibration:
+            return
+
+        units_per_pixel = self._scale_calibration.get("x_units_per_pixel")
+        unit_label = str(self._scale_calibration.get("unit_label", "")).strip()
+        meters_per_unit = self._scale_calibration.get("meters_per_unit")
+        zoom = abs(self._current_zoom())
+
+        if not isinstance(units_per_pixel, (int, float)) or units_per_pixel <= 0:
+            return
+        if not unit_label or zoom <= 0:
+            return
+
+        bar = self._select_scale_bar(
+            float(units_per_pixel),
+            unit_label,
+            (
+                float(meters_per_unit)
+                if isinstance(meters_per_unit, (int, float))
+                else None
+            ),
+            zoom,
+        )
+        if bar is None:
+            return
+
+        bar_px, label = bar
+        if bar_px < 40:
+            return
+
+        painter = QPainter(self.viewport())
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        margin = 16
+        tick_height = 10
+        label_gap = 6
+        fm = painter.fontMetrics()
+        label_w = fm.horizontalAdvance(label)
+        bar_w = int(round(bar_px))
+        content_w = max(bar_w, label_w)
+        content_h = fm.height() + label_gap + tick_height
+
+        panel_left = margin
+        panel_top = max(8.0, self.viewport().height() - margin - content_h - 12)
+        panel_rect = QRectF(
+            panel_left - 10, panel_top - 8, content_w + 20, content_h + 16
+        )
+
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 150))
+        painter.drawRoundedRect(panel_rect, 6, 6)
+
+        text_x = panel_left + (content_w - label_w) / 2.0
+        text_y = panel_top + fm.ascent()
+        painter.setPen(QColor(255, 255, 255))
+        painter.drawText(QPointF(text_x, text_y), label)
+
+        bar_left = panel_left + (content_w - bar_w) / 2.0
+        bar_top = panel_top + fm.height() + label_gap
+        bar_bottom = bar_top + tick_height
+
+        shadow_pen = QPen(QColor(0, 0, 0, 220), 3.6)
+        shadow_pen.setCapStyle(Qt.SquareCap)
+        painter.setPen(shadow_pen)
+        painter.drawLine(
+            QPointF(bar_left, bar_bottom), QPointF(bar_left + bar_w, bar_bottom)
+        )
+        painter.drawLine(QPointF(bar_left, bar_top), QPointF(bar_left, bar_bottom))
+        painter.drawLine(
+            QPointF(bar_left + bar_w, bar_top), QPointF(bar_left + bar_w, bar_bottom)
+        )
+
+        bar_pen = QPen(QColor(255, 255, 255), 2.0)
+        bar_pen.setCapStyle(Qt.SquareCap)
+        painter.setPen(bar_pen)
+        painter.drawLine(
+            QPointF(bar_left, bar_bottom), QPointF(bar_left + bar_w, bar_bottom)
+        )
+        painter.drawLine(QPointF(bar_left, bar_top), QPointF(bar_left, bar_bottom))
+        painter.drawLine(
+            QPointF(bar_left + bar_w, bar_top), QPointF(bar_left + bar_w, bar_bottom)
+        )
+
+        painter.end()
+
+    def _select_scale_bar(
+        self,
+        units_per_pixel: float,
+        unit_label: str,
+        meters_per_unit: Optional[float],
+        zoom: float,
+    ) -> Optional[tuple[float, str]]:
+        viewport_width = max(self.viewport().width(), 1)
+        target_px = min(180.0, max(90.0, viewport_width * 0.18))
+        min_px = 60.0
+        max_px = min(240.0, viewport_width * 0.4)
+        desired_units = target_px * units_per_pixel / zoom
+        if desired_units <= 0:
+            return None
+
+        candidates: List[tuple[float, str]] = []
+        if meters_per_unit is not None:
+            desired_meters = desired_units * meters_per_unit
+            for length_m in self._nice_number_candidates(desired_meters):
+                label = self._format_metric_length(length_m)
+                candidates.append((length_m / meters_per_unit, label))
+        else:
+            for length_units in self._nice_number_candidates(desired_units):
+                label = f"{self._format_number(length_units)} {unit_label}"
+                candidates.append((length_units, label))
+
+        best: Optional[tuple[float, str]] = None
+        best_score: Optional[tuple[int, float]] = None
+        for length_units, label in candidates:
+            bar_px = (length_units / units_per_pixel) * zoom
+            within = min_px <= bar_px <= max_px
+            score = (0 if within else 1, abs(bar_px - target_px))
+            if best_score is None or score < best_score:
+                best = (bar_px, label)
+                best_score = score
+        return best
+
+    def _nice_number_candidates(self, value: float) -> List[float]:
+        if value <= 0:
+            return []
+        exponent = int(math.floor(math.log10(value)))
+        candidates: List[float] = []
+        seen = set()
+        for exp in range(exponent - 2, exponent + 3):
+            scale = 10.0**exp
+            for base in (1.0, 2.0, 5.0):
+                candidate = base * scale
+                if candidate > 0 and candidate not in seen:
+                    seen.add(candidate)
+                    candidates.append(candidate)
+        candidates.sort()
+        return candidates
+
+    def _format_metric_length(self, length_m: float) -> str:
+        units = [
+            ("nm", 1e-9),
+            ("um", 1e-6),
+            ("mm", 1e-3),
+            ("cm", 1e-2),
+            ("m", 1.0),
+        ]
+        chosen_label, chosen_scale = units[0]
+        for label, scale in units:
+            value = length_m / scale
+            if value < 1:
+                break
+            chosen_label, chosen_scale = label, scale
+            if value < 1000:
+                break
+        return f"{self._format_number(length_m / chosen_scale)} {chosen_label}"
+
+    @staticmethod
+    def _format_number(value: float) -> str:
+        if value >= 100:
+            return f"{value:.0f}"
+        if value >= 10:
+            return f"{value:.1f}".rstrip("0").rstrip(".")
+        return f"{value:.2f}".rstrip("0").rstrip(".")
 
     def _reset_pan_smoothing(self):
         self._pan_ema = QPointF(0.0, 0.0)

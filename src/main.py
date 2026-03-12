@@ -52,6 +52,7 @@ from utils import (
     numpy_to_qimage,
     flatten_to_slices,
     rgb_like_to_gray,
+    extract_tiff_scale_calibration,
 )
 from widgets import ImageViewer, DraggablePanel, ROIListWindow
 from roi import roi_geometry, roi_mask, serialize_roi_geometry
@@ -724,7 +725,9 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
 
         try:
-            arr = tifffile.imread(path)
+            with tifffile.TiffFile(path) as tif:
+                arr = tif.asarray()
+                scale_calibration = extract_tiff_scale_calibration(tif)
             arr = rgb_like_to_gray(arr)
             flat, slices = flatten_to_slices(arr)
         except Exception as e:
@@ -751,6 +754,7 @@ class MainWindow(QMainWindow):
         else:
             self.slice_controls.hide()
 
+        self.viewer.set_scale_calibration(scale_calibration)
         self._render(fit=True)
         self._apply_rois_for_current_file()
         self._update_roi_stats()
@@ -1476,6 +1480,7 @@ class MainWindow(QMainWindow):
         self.total_slices = 1
         self.current_slice = 0
         self.active_file_path = None
+        self.viewer.set_scale_calibration(None)
         self.viewer.set_image(QPixmap())
         self.viewer.set_rois([], None)
         self.slice_controls.hide()

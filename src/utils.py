@@ -1,7 +1,42 @@
 import re
-from typing import Tuple
+from typing import Any, Dict, Optional, Tuple
+
 import numpy as np
+import tifffile
 from PySide6.QtGui import QImage
+
+_UNIT_ALIASES = {
+    "m": ("m", 1.0),
+    "meter": ("m", 1.0),
+    "meters": ("m", 1.0),
+    "metre": ("m", 1.0),
+    "metres": ("m", 1.0),
+    "cm": ("cm", 1e-2),
+    "centimeter": ("cm", 1e-2),
+    "centimeters": ("cm", 1e-2),
+    "centimetre": ("cm", 1e-2),
+    "centimetres": ("cm", 1e-2),
+    "mm": ("mm", 1e-3),
+    "millimeter": ("mm", 1e-3),
+    "millimeters": ("mm", 1e-3),
+    "millimetre": ("mm", 1e-3),
+    "millimetres": ("mm", 1e-3),
+    "um": ("um", 1e-6),
+    "micrometer": ("um", 1e-6),
+    "micrometers": ("um", 1e-6),
+    "micrometre": ("um", 1e-6),
+    "micrometres": ("um", 1e-6),
+    "µm": ("um", 1e-6),
+    "μm": ("um", 1e-6),
+    "nm": ("nm", 1e-9),
+    "nanometer": ("nm", 1e-9),
+    "nanometers": ("nm", 1e-9),
+    "nanometre": ("nm", 1e-9),
+    "nanometres": ("nm", 1e-9),
+    "in": ("in", 0.0254),
+    "inch": ("in", 0.0254),
+    "inches": ("in", 0.0254),
+}
 
 
 def natural_key(s: str):
@@ -69,3 +104,99 @@ def rgb_like_to_gray(arr: np.ndarray) -> np.ndarray:
         return gray
 
     return x
+
+
+def _normalize_physical_unit(raw_unit: Any) -> Tuple[Optional[str], Optional[float]]:
+    if raw_unit is None:
+        return None, None
+
+    text = str(raw_unit).strip()
+    if not text:
+        return None, None
+
+    normalized = text.lower()
+    if normalized in {"none", "pixel", "pixels", "px"}:
+        return None, None
+
+    unit = _UNIT_ALIASES.get(normalized)
+    if unit is not None:
+        return unit
+    return text, None
+
+
+def _coerce_positive_float(value: Any) -> Optional[float]:
+    try:
+        result = float(value)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+    return result if result > 0 else None
+
+
+def _rational_to_float(value: Any) -> Optional[float]:
+    result = _coerce_positive_float(value)
+    if result is not None:
+        return result
+    if isinstance(value, tuple) and len(value) == 2:
+        num = _coerce_positive_float(value[0])
+        den = _coerce_positive_float(value[1])
+        if num is None or den is None:
+            return None
+        return num / den
+    return None
+
+
+def extract_tiff_scale_calibration(
+    tif: tifffile.TiffFile,
+) -> Optional[Dict[str, Any]]:
+    if not tif.pages:
+        return None
+
+    page = tif.pages[0]
+    resolution = getattr(page, "resolution", None)
+    x_resolution = None
+    y_resolution = None
+    if isinstance(resolution, tuple) and len(resolution) >= 2:
+        x_resolution = _coerce_positive_float(resolution[0])
+        y_resolution = _coerce_positive_float(resolution[1])
+
+    if x_resolution is None or y_resolution is None:
+        tags = page.tags
+        if x_resolution is None and "XResolution" in tags:
+            x_resolution = _rational_to_float(tags["XResolution"].value)
+        if y_resolution is None and "YResolution" in tags:
+            y_resolution = _rational_to_float(tags["YResolution"].value)
+
+    if x_resolution is None or y_resolution is None:
+        return None
+
+    unit_label: Optional[str] = None
+    meters_per_unit: Optional[float] = None
+
+    imagej_meta = getattr(tif, "imagej_metadata", None) or {}
+    if isinstance(imagej_meta, dict):
+        unit_label, meters_per_unit = _normalize_physical_unit(imagej_meta.get("unit"))
+
+    if unit_label is None:
+        raw_unit = None
+        if "ResolutionUnit" in page.tags:
+            raw_unit = page.tags["ResolutionUnit"].value
+        unit_name = getattr(raw_unit, "name", "").lower()
+        unit_code = None
+        try:
+            unit_code = int(raw_unit) if raw_unit is not None else None
+        except (TypeError, ValueError):
+            unit_code = None
+        if unit_name == "inch" or unit_code == 2:
+            unit_label, meters_per_unit = "in", 0.0254
+        elif unit_name == "centimeter" or unit_code == 3:
+            unit_label, meters_per_unit = "cm", 1e-2
+
+    if unit_label is None:
+        return None
+
+    return {
+        "x_units_per_pixel": 1.0 / x_resolution,
+        "y_units_per_pixel": 1.0 / y_resolution,
+        "unit_label": unit_label,
+        "meters_per_unit": meters_per_unit,
+    }
