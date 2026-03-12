@@ -294,8 +294,10 @@ class MainWindow(QMainWindow):
         self.tree_view.setSortingEnabled(True)
         self.tree_view.sortByColumn(0, Qt.AscendingOrder)
         self.tree_view.setSelectionMode(QTreeView.ExtendedSelection)
+        self.tree_view.setSelectionBehavior(QTreeView.SelectRows)
         self.tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree_view.customContextMenuRequested.connect(self.on_tree_context_menu)
+        self.tree_view.clicked.connect(self.on_tree_clicked)
         self.tree_view.doubleClicked.connect(self.on_tree_double_clicked)
         self.tree_view.selectionModel().currentChanged.connect(
             self.on_tree_current_changed
@@ -695,11 +697,6 @@ class MainWindow(QMainWindow):
         self._rebuild_file_tree(preserve_selection=self.active_file_path)
         self.status.setText(f"Opened folder: {os.path.basename(folder)}")
 
-    def on_tree_double_clicked(self, index: QModelIndex):
-        path = self._path_from_proxy_index(index)
-        if path and os.path.isfile(path) and path.lower().endswith(SUPPORTED_EXTS):
-            self.load_tiff(path)
-
     def on_tree_context_menu(self, pos):
         index = self.tree_view.indexAt(pos)
         selected_paths = self._selected_tree_paths()
@@ -712,9 +709,15 @@ class MainWindow(QMainWindow):
         menu.exec(self.tree_view.viewport().mapToGlobal(pos))
 
     def on_tree_current_changed(self, current: QModelIndex, previous: QModelIndex):
-        path = self._path_from_proxy_index(current)
-        if path and path == self.active_file_path:
-            return
+        pass
+
+    def on_tree_clicked(self, index: QModelIndex):
+        path = self._path_from_proxy_index(index)
+        if path and os.path.isfile(path) and path.lower().endswith(SUPPORTED_EXTS):
+            self.load_tiff(path)
+
+    def on_tree_double_clicked(self, index: QModelIndex):
+        path = self._path_from_proxy_index(index)
         if path and os.path.isfile(path) and path.lower().endswith(SUPPORTED_EXTS):
             self.load_tiff(path)
 
