@@ -14,6 +14,7 @@ from PySide6.QtCore import (
     QDir,
     QModelIndex,
     QSortFilterProxyModel,
+    QThreadPool,
 )
 from PySide6.QtGui import (
     QPixmap,
@@ -56,8 +57,15 @@ from utils import (
 )
 from widgets import ImageViewer, DraggablePanel, ROIListWindow
 from roi import roi_geometry, roi_mask, serialize_roi_geometry
+from io_handler import (
+    load_tiff_data,
+    save_rois_to_json,
+    load_rois_from_json,
+    TiffLoaderWorker,
+    SUPPORTED_EXTS,
+)
 
-SUPPORTED_EXTS = (".tif", ".tiff")
+# SUPPORTED_EXTS = (".tif", ".tiff")
 
 
 class TiffTreeFilterProxyModel(QSortFilterProxyModel):
@@ -223,6 +231,7 @@ class MainWindow(QMainWindow):
         self.selected_roi_by_file: Dict[str, int] = {}
         self._updating_rois_from_file = False
         self._updating_roi_list_ui = False
+        self.loading_pool = QThreadPool.globalInstance()
 
         self._build_ui()
         self._build_menu()
@@ -724,19 +733,24 @@ class MainWindow(QMainWindow):
     # ---------------- TIFF load/render ----------------
     def load_tiff(self, path: str):
         path = os.path.abspath(path)
-        self.status.setText(f"Loading {os.path.basename(path)}...")
-        QApplication.processEvents()
-
-        try:
-            with tifffile.TiffFile(path) as tif:
-                arr = tif.asarray()
-                scale_calibration = extract_tiff_scale_calibration(tif)
-            arr = rgb_like_to_gray(arr)
-            flat, slices = flatten_to_slices(arr)
-        except Exception as e:
-            self.status.setText(f"Failed to load {os.path.basename(path)}: {e}")
+        if self.active_file_path == path:
             return
 
+        self.status.setText(f"Loading {os.path.basename(path)}...")
+
+        worker = TiffLoaderWorker(path)
+        worker.signals.finished.connect(self._on_tiff_loaded)
+        worker.signals.error.connect(self._on_tiff_load_error)
+        self.loading_pool.start(worker)
+
+    def _on_tiff_loaded(
+        self,
+        path: str,
+        flat: np.ndarray,
+        slices: int,
+        calibration: Any,
+        initial_pix: QPixmap,
+    ):
         self.loaded = flat
         self.total_slices = slices
         self.current_slice = 0
@@ -757,15 +771,17 @@ class MainWindow(QMainWindow):
         else:
             self.slice_controls.hide()
 
-        self.viewer.set_scale_calibration(scale_calibration)
-        self._render(fit=True)
+        self.viewer.set_scale_calibration(calibration)
+        self.viewer.set_image(initial_pix, fit=True)
         self._apply_rois_for_current_file()
         self._update_roi_stats()
 
-        # Clear the "Loading..." status after everything is done
         self.status.setText("")
         self._select_tree_path(path)
         self._update_slice_info(path)
+
+    def _on_tiff_load_error(self, path: str, error_msg: str):
+        self.status.setText(f"Failed to load {os.path.basename(path)}: {error_msg}")
 
     def _update_slice_info(self, path: str):
         name = path
@@ -1048,11 +1064,6 @@ class MainWindow(QMainWindow):
             self.status.setText("No active TIFF file for ROI save.")
             return
         rois = self.rois_by_file.get(path, [])
-        data_rois = []
-        for roi in rois:
-            s = serialize_roi_geometry(roi)
-            if s is not None:
-                data_rois.append(s)
 
         default_name = os.path.splitext(os.path.basename(path))[0] + ".roi.json"
         default_path = os.path.join(os.path.dirname(path), default_name)
@@ -1064,21 +1075,13 @@ class MainWindow(QMainWindow):
         )
         if not save_path:
             return
-        payload = {
-            "version": 1,
-            "image_path": os.path.abspath(path),
-            "image_name": os.path.basename(path),
-            "rois": data_rois,
-        }
+
         try:
-            with open(save_path, "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=2)
+            count = save_rois_to_json(save_path, path, rois)
         except Exception as e:
             self.status.setText(f"Failed to save ROI file: {e}")
             return
-        self.status.setText(
-            f"Saved {len(data_rois)} ROI(s) to {os.path.basename(save_path)}"
-        )
+        self.status.setText(f"Saved {count} ROI(s) to {os.path.basename(save_path)}")
 
     def _load_rois_into_current_file(self):
         path = self._current_file_path()
@@ -1094,38 +1097,10 @@ class MainWindow(QMainWindow):
         if not load_path:
             return
         try:
-            with open(load_path, "r", encoding="utf-8") as f:
-                payload = json.load(f)
+            rois = load_rois_from_json(load_path)
         except Exception as e:
             self.status.setText(f"Failed to load ROI file: {e}")
             return
-
-        raw = payload.get("rois", [])
-        if not isinstance(raw, list):
-            self.status.setText("Invalid ROI file: 'rois' must be a list.")
-            return
-
-        rois = []
-        for r in raw:
-            if not isinstance(r, dict):
-                continue
-            typ = r.get("type")
-            if typ == "polygon":
-                pts = r.get("points", [])
-                if isinstance(pts, list) and len(pts) >= 3:
-                    rois.append(
-                        {"type": typ, "points": [(float(x), float(y)) for x, y in pts]}
-                    )
-            elif typ in ("rect", "ellipse"):
-                rois.append(
-                    {
-                        "type": typ,
-                        "x": float(r.get("x", 0.0)),
-                        "y": float(r.get("y", 0.0)),
-                        "w": float(r.get("w", 0.0)),
-                        "h": float(r.get("h", 0.0)),
-                    }
-                )
 
         self.rois_by_file[path] = rois
         self.selected_roi_by_file[path] = 0 if rois else None
