@@ -29,14 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .constants import (
-    DARK_OVERLAY_STYLE,
-    ROI_ELLIPSE,
-    ROI_LIST_STYLE,
-    ROI_NONE,
-    ROI_POLYGON,
-    ROI_RECT,
-)
+from .constants import ROI_ELLIPSE, ROI_NONE, ROI_POLYGON, ROI_RECT
 
 
 class DraggablePanel(QFrame):
@@ -91,8 +84,6 @@ class ROIListWindow(QWidget):
         self.resize(300, 420)
         self.on_closed: Optional[Callable[[], None]] = None
         self._closed_by_user = True
-
-        self.setStyleSheet(ROI_LIST_STYLE)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -204,7 +195,6 @@ class ImageViewer(QGraphicsView):
         # Create a container for the buttons
         self.overlay_panel = QFrame(self)
         self.overlay_panel.setObjectName("overlayPanel")
-        self.overlay_panel.setStyleSheet(DARK_OVERLAY_STYLE)
 
         v_layout = QVBoxLayout(self.overlay_panel)
         v_layout.setContentsMargins(4, 4, 4, 4)

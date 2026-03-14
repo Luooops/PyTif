@@ -5,6 +5,7 @@ import sys
 from typing import Any, Dict, List, Optional, Set
 
 import numpy as np
+import qdarktheme
 from PySide6.QtCore import QDir, QModelIndex, QPointF, QSettings, QSize, Qt, QThreadPool
 from PySide6.QtGui import (
     QAction,
@@ -45,9 +46,7 @@ from .constants import (
     ORG_DOMAIN,
     ORG_NAME,
     ROI_JSON_EXTENSION,
-    ROI_PANEL_STYLE,
     SUPPORTED_EXTS,
-    TREE_VIEW_STYLE,
 )
 from .file_filter_model import FileFilterModel
 from .io_handler import TiffLoaderWorker, load_rois_from_json, save_rois_to_json
@@ -147,7 +146,6 @@ class MainWindow(QMainWindow):
         self.file_proxy.setSourceModel(self.file_model)
 
         self.tree_view = QTreeView()
-        self.tree_view.setStyleSheet(TREE_VIEW_STYLE)
         self.tree_view.setModel(self.file_proxy)
         self.tree_view.setHeaderHidden(True)
         self.tree_view.setSortingEnabled(True)
@@ -233,7 +231,6 @@ class MainWindow(QMainWindow):
         self.roi_panel = DraggablePanel(self)
         self.roi_panel.setFrameShape(QFrame.StyledPanel)
         self.roi_panel.setObjectName("roiPanel")
-        self.roi_panel.setStyleSheet(ROI_PANEL_STYLE)
         panel_layout = QVBoxLayout(self.roi_panel)
         panel_layout.setContentsMargins(8, 8, 8, 8)
         panel_layout.setSpacing(6)
@@ -317,10 +314,6 @@ class MainWindow(QMainWindow):
     def _build_roi_stats_panel(self, parent_layout: QVBoxLayout):
         self.roi_stats_panel = QFrame()
         self.roi_stats_panel.setObjectName("roiStatsPanel")
-        self.roi_stats_panel.setStyleSheet(
-            "#roiStatsPanel { border: 1px solid #666; border-radius: 6px; background: rgba(30,30,30,140); }"
-            "#roiStatsPanel QLabel { color: #ddd; }"
-        )
         stats_layout = QFormLayout(self.roi_stats_panel)
         stats_layout.setContentsMargins(8, 6, 8, 6)
         stats_layout.setLabelAlignment(Qt.AlignRight)
@@ -1315,6 +1308,9 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+
+    qdarktheme.setup_theme("auto")
+
     w = MainWindow()
     w.show()
     sys.exit(app.exec())
