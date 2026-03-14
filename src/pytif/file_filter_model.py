@@ -3,8 +3,8 @@ from typing import Dict, Optional, Set
 
 from PySide6.QtCore import QModelIndex, QSortFilterProxyModel
 
-from io_handler import SUPPORTED_EXTS
-from utils import natural_key
+from .io_handler import SUPPORTED_EXTS
+from .utils import natural_key
 
 
 class FileFilterModel(QSortFilterProxyModel):

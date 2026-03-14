@@ -1,5 +1,4 @@
 import copy
-import json
 import os
 import platform
 import sys
@@ -39,16 +38,22 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from io_handler import (
+from .constants import (
+    APP_TITLE,
+    DEFAULT_WINDOW_HEIGHT,
+    DEFAULT_WINDOW_WIDTH,
+    ORG_DOMAIN,
+    ORG_NAME,
+    ROI_JSON_EXTENSION,
+    ROI_PANEL_STYLE,
     SUPPORTED_EXTS,
-    TiffLoaderWorker,
-    load_rois_from_json,
-    save_rois_to_json,
+    TREE_VIEW_STYLE,
 )
-from roi import roi_geometry, roi_mask
-from src.file_viewer_model import FileFilterModel
-from utils import natural_key, numpy_to_qimage
-from widgets import DraggablePanel, ImageViewer, ROIListWindow
+from .file_filter_model import FileFilterModel
+from .io_handler import TiffLoaderWorker, load_rois_from_json, save_rois_to_json
+from .roi import roi_geometry, roi_mask
+from .utils import natural_key, numpy_to_qimage
+from .widgets import DraggablePanel, ImageViewer, ROIListWindow
 
 
 # -------------------------
@@ -57,11 +62,11 @@ from widgets import DraggablePanel, ImageViewer, ROIListWindow
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PyTIF Viewer")
-        self.resize(1400, 850)
+        self.setWindowTitle(APP_TITLE)
+        self.resize(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
         self.setAcceptDrops(True)
 
-        self.settings = QSettings("PyTIF", "Viewer")
+        self.settings = QSettings(ORG_NAME, ORG_DOMAIN)
 
         # Navigation state
         self.current_folder: Optional[str] = None
@@ -142,10 +147,7 @@ class MainWindow(QMainWindow):
         self.file_proxy.setSourceModel(self.file_model)
 
         self.tree_view = QTreeView()
-        self.tree_view.setStyleSheet(
-            "QTreeView::item:selected { background-color: #3d5a80; color: white; }"
-            "QTreeView::item:selected:!active { background-color: #3d5a80; color: white; }"
-        )
+        self.tree_view.setStyleSheet(TREE_VIEW_STYLE)
         self.tree_view.setModel(self.file_proxy)
         self.tree_view.setHeaderHidden(True)
         self.tree_view.setSortingEnabled(True)
@@ -231,12 +233,7 @@ class MainWindow(QMainWindow):
         self.roi_panel = DraggablePanel(self)
         self.roi_panel.setFrameShape(QFrame.StyledPanel)
         self.roi_panel.setObjectName("roiPanel")
-        self.roi_panel.setStyleSheet(
-            "#roiPanel { background: rgba(40,40,40,220); border: 1px solid #666; border-radius: 8px; }"
-            "#roiPanel QLabel { color: #ddd; }"
-            "#roiPanel QToolButton { background: transparent; border: 1px solid #888; border-radius: 6px; padding: 2px; }"
-            "#roiPanel QToolButton:checked { background: #2d7bd8; border-color: #64a7ff; }"
-        )
+        self.roi_panel.setStyleSheet(ROI_PANEL_STYLE)
         panel_layout = QVBoxLayout(self.roi_panel)
         panel_layout.setContentsMargins(8, 8, 8, 8)
         panel_layout.setSpacing(6)
@@ -913,7 +910,7 @@ class MainWindow(QMainWindow):
             return
         rois = self.rois_by_file.get(path, [])
 
-        default_name = os.path.splitext(os.path.basename(path))[0] + ".roi.json"
+        default_name = os.path.splitext(os.path.basename(path))[0] + ROI_JSON_EXTENSION
         default_path = os.path.join(os.path.dirname(path), default_name)
         save_path, _ = QFileDialog.getSaveFileName(
             self,

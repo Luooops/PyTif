@@ -29,6 +29,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .constants import (
+    DARK_OVERLAY_STYLE,
+    ROI_ELLIPSE,
+    ROI_LIST_STYLE,
+    ROI_NONE,
+    ROI_POLYGON,
+    ROI_RECT,
+)
+
 
 class DraggablePanel(QFrame):
     def __init__(self, parent=None):
@@ -83,12 +92,7 @@ class ROIListWindow(QWidget):
         self.on_closed: Optional[Callable[[], None]] = None
         self._closed_by_user = True
 
-        self.setStyleSheet(
-            "QWidget { background: rgba(28,28,28,235); color: #ddd; }"
-            "QListWidget { background: rgba(20,20,20,220); border: 1px solid #555; }"
-            "QPushButton { background: #3a3a3a; border: 1px solid #666; padding: 4px 8px; }"
-            "QPushButton:hover { background: #4a4a4a; }"
-        )
+        self.setStyleSheet(ROI_LIST_STYLE)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -121,10 +125,10 @@ class ROIListWindow(QWidget):
 
 
 class ImageViewer(QGraphicsView):
-    ROI_NONE = "none"
-    ROI_POLYGON = "polygon"
-    ROI_RECT = "rect"
-    ROI_ELLIPSE = "ellipse"
+    ROI_NONE = ROI_NONE
+    ROI_POLYGON = ROI_POLYGON
+    ROI_RECT = ROI_RECT
+    ROI_ELLIPSE = ROI_ELLIPSE
 
     def __init__(self):
         super().__init__()
@@ -200,13 +204,7 @@ class ImageViewer(QGraphicsView):
         # Create a container for the buttons
         self.overlay_panel = QFrame(self)
         self.overlay_panel.setObjectName("overlayPanel")
-        self.overlay_panel.setStyleSheet(
-            "#overlayPanel { background: rgba(40,40,40,150); border: 1px solid #555; border-radius: 4px; }"
-            "QPushButton { background: rgba(60,60,60,200); border: 1px solid #777; border-radius: 2px; color: white; min-width: 32px; min-height: 32px; font-weight: bold; font-size: 16px; }"
-            "QPushButton:hover { background: rgba(80,80,80,220); border-color: #999; }"
-            "QPushButton:pressed { background: rgba(45,123,216,200); }"
-            "QPushButton:checked { background: rgba(45,123,216,220); border-color: #64a7ff; }"
-        )
+        self.overlay_panel.setStyleSheet(DARK_OVERLAY_STYLE)
 
         v_layout = QVBoxLayout(self.overlay_panel)
         v_layout.setContentsMargins(4, 4, 4, 4)

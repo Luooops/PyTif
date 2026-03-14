@@ -7,15 +7,14 @@ import tifffile
 from PySide6.QtCore import QObject, QRunnable, Signal
 from PySide6.QtGui import QPixmap
 
-from roi import serialize_roi_geometry
-from utils import (
+from .constants import SUPPORTED_EXTS
+from .roi import serialize_roi_geometry
+from .utils import (
     extract_tiff_scale_calibration,
     flatten_to_slices,
     numpy_to_qimage,
     rgb_like_to_gray,
 )
-
-SUPPORTED_EXTS = (".tif", ".tiff")
 
 
 def load_tiff_data(path: str) -> Tuple[np.ndarray, int, Optional[Dict[str, Any]]]:
