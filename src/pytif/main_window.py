@@ -93,12 +93,15 @@ class MainWindow(QMainWindow):
         root = QWidget()
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
 
         top = QHBoxLayout()
         layout.addLayout(top)
 
         # File dropdown button
         self.btn_file = QToolButton()
+        self.btn_file.setFixedHeight(30)
         self.btn_file.setText("Open")
         if platform.system() == "Darwin":  # macOS
             self.btn_file.setPopupMode(QToolButton.InstantPopup)
@@ -113,6 +116,7 @@ class MainWindow(QMainWindow):
 
         # Close dropdown button
         self.btn_close = QToolButton()
+        self.btn_close.setFixedHeight(30)
         self.btn_close.setText("Close")
         if platform.system() == "Darwin":  # macOS
             self.btn_close.setPopupMode(QToolButton.InstantPopup)
@@ -126,6 +130,7 @@ class MainWindow(QMainWindow):
         top.addWidget(self.btn_close)
 
         self.btn_sidebar = QPushButton("Hide Sidebar")
+        self.btn_sidebar.setFixedHeight(30)
         self.btn_sidebar.clicked.connect(self.toggle_sidebar)
         top.addWidget(self.btn_sidebar)
 
@@ -163,6 +168,7 @@ class MainWindow(QMainWindow):
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
         self.splitter.addWidget(right)
         self.splitter.setStretchFactor(1, 1)
 
@@ -226,6 +232,32 @@ class MainWindow(QMainWindow):
         act_close.setShortcut("Meta+W")  # ⌘W
         act_close.triggered.connect(self.close)
         file_menu.addAction(act_close)
+
+        # Preferences menu
+        pref_menu = self.menuBar().addMenu("Preferences")
+        theme_menu = pref_menu.addMenu("Theme")
+
+        self.act_theme_auto = QAction("Follow System", self)
+        self.act_theme_auto.setCheckable(True)
+        self.act_theme_auto.triggered.connect(lambda: self._set_theme("auto"))
+
+        self.act_theme_light = QAction("Light", self)
+        self.act_theme_light.setCheckable(True)
+        self.act_theme_light.triggered.connect(lambda: self._set_theme("light"))
+
+        self.act_theme_dark = QAction("Dark", self)
+        self.act_theme_dark.setCheckable(True)
+        self.act_theme_dark.triggered.connect(lambda: self._set_theme("dark"))
+
+        theme_menu.addAction(self.act_theme_auto)
+        theme_menu.addAction(self.act_theme_light)
+        theme_menu.addAction(self.act_theme_dark)
+
+        # Set default state of menu actions
+        current_theme = self.settings.value("theme", "auto")
+        self.act_theme_auto.setChecked(current_theme == "auto")
+        self.act_theme_light.setChecked(current_theme == "light")
+        self.act_theme_dark.setChecked(current_theme == "dark")
 
     def _build_roi_panel(self):
         self.roi_panel = DraggablePanel(self)
@@ -1305,11 +1337,63 @@ class MainWindow(QMainWindow):
         if status_text:
             self.status.setText(status_text)
 
+    def _set_theme(self, theme: str):
+        self.settings.setValue("theme", theme)
+        qdarktheme.setup_theme(
+            theme,
+            custom_colors={
+                "primary": "#3399ff",
+                "border": "#555555",
+            },
+        )
+        # Update check marks
+        self.act_theme_auto.setChecked(theme == "auto")
+        self.act_theme_light.setChecked(theme == "light")
+        self.act_theme_dark.setChecked(theme == "dark")
+
 
 def main():
     app = QApplication(sys.argv)
 
-    qdarktheme.setup_theme("auto")
+    # Initial setup based on settings
+    settings = QSettings(ORG_NAME, ORG_DOMAIN)
+    current_theme = settings.value("theme", "auto")
+
+    qdarktheme.setup_theme(
+        current_theme,
+        custom_colors={
+            "primary": "#3399ff",
+            "border": "#555555",
+        },
+    )
+
+    # Add custom style for better borders on buttons and combo boxes
+    app.setStyleSheet(
+        app.styleSheet()
+        + """
+        QMenuBar::item {
+            padding: 4px 12px;
+            margin: 0px;
+        }
+        QPushButton, QToolButton, QComboBox, QSpinBox, QDoubleSpinBox {
+            border: 1px solid #666666;
+            border-radius: 4px;
+            padding: 4px;
+        }
+        QToolButton::menu-button {
+            border: 1px solid #666666;
+            border-top-right-radius: 4px;
+            border-bottom-right-radius: 4px;
+            width: 16px;
+        }
+        QPushButton:hover, QToolButton:hover, QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover, QToolButton::menu-button:hover {
+            border: 1px solid #888888;
+        }
+        QPushButton:pressed, QToolButton:pressed {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        """
+    )
 
     w = MainWindow()
     w.show()
