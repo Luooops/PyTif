@@ -5,7 +5,7 @@ from PyInstaller.utils.hooks import collect_all
 datas, binaries, hiddenimports = collect_all('imagecodecs')
 
 a = Analysis(
-    ['src/pytif/__main__.py'],
+    ['main.py'],
     pathex=['src'],
     binaries=binaries,
     datas=datas,

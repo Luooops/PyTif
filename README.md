@@ -23,7 +23,7 @@ uv sync
 To run the program, use:
 
 ```bash
-uv run python -m pytif
+uv run main.py
 ```
 
 ## Building the App
