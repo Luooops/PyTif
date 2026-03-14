@@ -1375,6 +1375,13 @@ def main():
             padding: 4px 12px;
             margin: 0px;
         }
+        QMenu {
+            min-width: 200px;
+        }
+        QMenu::item {
+            min-width: 180px;
+            padding: 4px 20px;
+        }
         QPushButton, QToolButton, QComboBox, QSpinBox, QDoubleSpinBox {
             border: 1px solid #666666;
             border-radius: 4px;
