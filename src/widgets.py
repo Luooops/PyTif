@@ -1,32 +1,32 @@
-from typing import Any, Callable, Dict, List, Optional
-import math
 import copy
+import math
+from typing import Any, Callable, Dict, List, Optional
 
-from PySide6.QtCore import Qt, QPointF, QRectF, QLineF, QEvent
+from PySide6.QtCore import QEvent, QLineF, QPointF, QRectF, Qt
 from PySide6.QtGui import (
+    QBrush,
+    QColor,
     QMouseEvent,
     QPainter,
-    QPen,
-    QBrush,
     QPainterPath,
-    QWheelEvent,
-    QColor,
+    QPen,
     QPixmap,
+    QWheelEvent,
 )
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
+    QFrame,
+    QGraphicsEllipseItem,
+    QGraphicsLineItem,
+    QGraphicsPathItem,
+    QGraphicsPixmapItem,
+    QGraphicsScene,
+    QGraphicsView,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QPushButton,
-    QFrame,
-    QGraphicsView,
-    QGraphicsScene,
-    QGraphicsPixmapItem,
-    QGraphicsPathItem,
-    QGraphicsLineItem,
-    QGraphicsEllipseItem,
+    QVBoxLayout,
+    QWidget,
 )
 
 

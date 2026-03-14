@@ -1,18 +1,19 @@
-import os
 import json
-import tifffile
-import numpy as np
+import os
 from typing import Any, Dict, List, Optional, Tuple
-from PySide6.QtCore import QObject, Signal, QRunnable
+
+import numpy as np
+import tifffile
+from PySide6.QtCore import QObject, QRunnable, Signal
 from PySide6.QtGui import QPixmap
 
+from roi import serialize_roi_geometry
 from utils import (
     extract_tiff_scale_calibration,
-    rgb_like_to_gray,
     flatten_to_slices,
     numpy_to_qimage,
+    rgb_like_to_gray,
 )
-from roi import serialize_roi_geometry
 
 SUPPORTED_EXTS = (".tif", ".tiff")
 
