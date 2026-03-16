@@ -41,10 +41,13 @@ from PySide6.QtWidgets import (
 
 from .constants import (
     APP_TITLE,
+    BORDER_COLOR,
+    CUSTOM_APP_STYLESHEET,
     DEFAULT_WINDOW_HEIGHT,
     DEFAULT_WINDOW_WIDTH,
     ORG_DOMAIN,
     ORG_NAME,
+    PRIMARY_COLOR,
     ROI_JSON_EXTENSION,
     SUPPORTED_EXTS,
 )
@@ -174,10 +177,12 @@ class MainWindow(QMainWindow):
 
         self.viewer = ImageViewer()
         self.viewer.on_rois_changed = self._on_viewer_rois_changed
+        self.viewer.on_scale_set = self._on_viewer_scale_set
         self.viewer.btn_zoom_in.clicked.connect(self._zoom_in)
         self.viewer.btn_zoom_out.clicked.connect(self._zoom_out)
         self.viewer.btn_fit.clicked.connect(self._fit)
         self.viewer.btn_roi.toggled.connect(self._toggle_roi_mode)
+        self.viewer.btn_scale.toggled.connect(self._toggle_scale_mode)
         right_layout.addWidget(self.viewer, 1)
 
         # Slice controls (only for multi-slice)
@@ -362,11 +367,14 @@ class MainWindow(QMainWindow):
         self.lbl_roi_minmax = QLabel("—")
         self.lbl_roi_std = QLabel("—")
 
+        self.lbl_area_head = QLabel("Area (px²)")
+        self.lbl_perim_head = QLabel("Perimeter (px)")
+
         stats_layout.addRow("ROI Type", self.lbl_roi_type)
         stats_layout.addRow("ROIs in File", self.lbl_roi_count)
         stats_layout.addRow("Coordinates", self.lbl_roi_coords)
-        stats_layout.addRow("Area (px²)", self.lbl_roi_area)
-        stats_layout.addRow("Perimeter (px)", self.lbl_roi_perimeter)
+        stats_layout.addRow(self.lbl_area_head, self.lbl_roi_area)
+        stats_layout.addRow(self.lbl_perim_head, self.lbl_roi_perimeter)
         stats_layout.addRow("Pixel Count", self.lbl_roi_pixels)
         stats_layout.addRow("Mean", self.lbl_roi_mean)
         stats_layout.addRow("Min / Max", self.lbl_roi_minmax)
@@ -729,6 +737,8 @@ class MainWindow(QMainWindow):
             self.viewer.btn_roi.blockSignals(False)
 
         if enabled:
+            if self.viewer.btn_scale.isChecked():
+                self.viewer.btn_scale.setChecked(False)
             self._sync_roi_type_buttons()
             self._show_roi_panel()
             self._show_roi_window()
@@ -829,6 +839,37 @@ class MainWindow(QMainWindow):
             self.selected_roi_by_file[path] = int(selected_idx)
         self._refresh_roi_list()
         self._update_roi_stats()
+
+    def _toggle_scale_mode(self, enabled: bool):
+        self.viewer.set_scale_line_mode(enabled)
+        if enabled:
+            # Disable ROI mode if scale mode is enabled
+            if self.viewer.btn_roi.isChecked():
+                self.viewer.btn_roi.setChecked(False)
+            self.status.setText(
+                "Scale mode: Click and drag a line over an object of known size."
+            )
+        else:
+            path = self._current_file_path()
+            if path:
+                self._update_slice_info(path)
+            else:
+                self.status.setText("")
+
+    def _on_viewer_scale_set(self, pixel_dist: float, known_dist: float, unit: str):
+        path = self._current_file_path()
+        if not path:
+            return
+
+        units_per_pixel = known_dist / pixel_dist
+        calibration = {
+            "x_units_per_pixel": units_per_pixel,
+            "y_units_per_pixel": units_per_pixel,
+            "unit_label": unit,
+        }
+        self.viewer.set_scale_calibration(calibration)
+        self._update_roi_stats()
+        self.status.setText(f"Scale set: 1 pixel = {units_per_pixel:.4g} {unit}")
 
     def _apply_rois_for_current_file(self):
         path = self._current_file_path()
@@ -994,6 +1035,18 @@ class MainWindow(QMainWindow):
         rois = self.rois_by_file.get(path, []) if path else []
         self.lbl_roi_count.setText(str(len(rois)))
         state = self.viewer.selected_roi()
+
+        calib = self.viewer._scale_calibration
+        units_per_pixel = calib.get("x_units_per_pixel", 1.0) if calib else 1.0
+        unit_label = calib.get("unit_label", "px") if calib else "px"
+
+        if unit_label == "px":
+            self.lbl_area_head.setText("Area (px²)")
+            self.lbl_perim_head.setText("Perimeter (px)")
+        else:
+            self.lbl_area_head.setText(f"Area ({unit_label}²)")
+            self.lbl_perim_head.setText(f"Perimeter ({unit_label})")
+
         if state is None:
             for lbl in [
                 self.lbl_roi_type,
@@ -1027,9 +1080,12 @@ class MainWindow(QMainWindow):
         else:
             self.lbl_roi_coords.setText("—")
 
-        area, perimeter = roi_geometry(state)
-        self.lbl_roi_area.setText(f"{area:.2f}")
-        self.lbl_roi_perimeter.setText(f"{perimeter:.2f}")
+        area_px, perimeter_px = roi_geometry(state)
+        area_scaled = area_px * (units_per_pixel**2)
+        perimeter_scaled = perimeter_px * units_per_pixel
+
+        self.lbl_roi_area.setText(f"{area_scaled:.2f}")
+        self.lbl_roi_perimeter.setText(f"{perimeter_scaled:.2f}")
 
         img = self._current_slice_image()
         if img is None:
@@ -1342,8 +1398,8 @@ class MainWindow(QMainWindow):
         qdarktheme.setup_theme(
             theme,
             custom_colors={
-                "primary": "#3399ff",
-                "border": "#555555",
+                "primary": PRIMARY_COLOR,
+                "border": BORDER_COLOR,
             },
         )
         # Update check marks
@@ -1362,45 +1418,13 @@ def main():
     qdarktheme.setup_theme(
         current_theme,
         custom_colors={
-            "primary": "#3399ff",
-            "border": "#555555",
+            "primary": PRIMARY_COLOR,
+            "border": BORDER_COLOR,
         },
     )
 
     # Add custom style for better borders on buttons and combo boxes
-    app.setStyleSheet(
-        app.styleSheet()
-        + """
-        QMenuBar::item {
-            padding: 4px 12px;
-            margin: 0px;
-        }
-        QMenu {
-            min-width: 200px;
-        }
-        QMenu::item {
-            min-width: 180px;
-            padding: 4px 20px;
-        }
-        QPushButton, QToolButton, QComboBox, QSpinBox, QDoubleSpinBox {
-            border: 1px solid #666666;
-            border-radius: 4px;
-            padding: 4px;
-        }
-        QToolButton::menu-button {
-            border: 1px solid #666666;
-            border-top-right-radius: 4px;
-            border-bottom-right-radius: 4px;
-            width: 16px;
-        }
-        QPushButton:hover, QToolButton:hover, QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover, QToolButton::menu-button:hover {
-            border: 1px solid #888888;
-        }
-        QPushButton:pressed, QToolButton:pressed {
-            background-color: rgba(255, 255, 255, 0.1);
-        }
-        """
-    )
+    app.setStyleSheet(app.styleSheet() + CUSTOM_APP_STYLESHEET)
 
     w = MainWindow()
     w.show()

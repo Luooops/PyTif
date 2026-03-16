@@ -14,6 +14,8 @@ from PySide6.QtGui import (
     QWheelEvent,
 )
 from PySide6.QtWidgets import (
+    QDialog,
+    QFormLayout,
     QFrame,
     QGraphicsEllipseItem,
     QGraphicsLineItem,
@@ -23,6 +25,7 @@ from PySide6.QtWidgets import (
     QGraphicsView,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QPushButton,
     QVBoxLayout,
@@ -30,6 +33,48 @@ from PySide6.QtWidgets import (
 )
 
 from .constants import ROI_ELLIPSE, ROI_NONE, ROI_POLYGON, ROI_RECT
+
+
+class ScaleDialog(QDialog):
+    def __init__(self, pixel_distance: float, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Set Scale")
+        self.setFixedSize(300, 180)
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.lbl_pixels = QLabel(f"{pixel_distance:.2f}")
+        self.txt_known = QLineEdit()
+        self.txt_known.setPlaceholderText("e.g. 100")
+        self.txt_unit = QLineEdit()
+        self.txt_unit.setPlaceholderText("e.g. um")
+
+        form.addRow("Pixel Distance:", self.lbl_pixels)
+        form.addRow("Known Distance:", self.txt_known)
+        form.addRow("Unit:", self.txt_unit)
+
+        layout.addLayout(form)
+
+        btns = QHBoxLayout()
+        self.btn_ok = QPushButton("OK")
+        self.btn_cancel = QPushButton("Cancel")
+        btns.addWidget(self.btn_ok)
+        btns.addWidget(self.btn_cancel)
+        layout.addLayout(btns)
+
+        self.btn_ok.clicked.connect(self.accept)
+        self.btn_cancel.clicked.connect(self.reject)
+
+    def get_values(self) -> Optional[tuple[float, str]]:
+        try:
+            known = float(self.txt_known.text())
+            unit = self.txt_unit.text().strip() or "units"
+            if known <= 0:
+                return None
+            return known, unit
+        except ValueError:
+            return None
 
 
 class DraggablePanel(QFrame):
@@ -154,6 +199,15 @@ class ImageViewer(QGraphicsView):
         self._shape_end: Optional[QPointF] = None
         self._shape_drawing = False
 
+        self._scale_line_mode = False
+        self._scale_line_start: Optional[QPointF] = None
+        self._scale_line_end: Optional[QPointF] = None
+        self._scale_line_item = QGraphicsLineItem()
+        self._scale_line_item.setPen(QPen(QColor(255, 255, 0), 2))
+        self._scale_line_item.setZValue(15)
+        self._scene.addItem(self._scale_line_item)
+        self._scale_line_item.hide()
+
         self._snap_threshold_px = 14.0
         self._vertex_radius = 4.0
         self._vertex_radius_hover = 6.0
@@ -191,6 +245,8 @@ class ImageViewer(QGraphicsView):
         ] = None
         self._suppress_notify = False
 
+        self.on_scale_set: Optional[Callable[[float, float, str], None]] = None
+
     def _setup_ui_overlay(self):
         # Create a container for the buttons
         self.overlay_panel = QFrame(self)
@@ -217,9 +273,40 @@ class ImageViewer(QGraphicsView):
         v_layout.addWidget(self.btn_fit)
         v_layout.addWidget(self.btn_roi)
 
+        self.btn_scale = QPushButton("Scale")
+        self.btn_scale.setCheckable(True)
+        self.btn_scale.setToolTip("Set Scale")
+        self.btn_scale.setStyleSheet("font-size: 11px;")
+        v_layout.addWidget(self.btn_scale)
+
         self.overlay_panel.adjustSize()
         self.overlay_panel.hide()
         self._update_overlay_pos()
+
+    def set_scale_line_mode(self, enabled: bool):
+        self._scale_line_mode = enabled
+        if enabled:
+            self.setDragMode(QGraphicsView.NoDrag)
+            self.setCursor(Qt.CrossCursor)
+        else:
+            self.setDragMode(QGraphicsView.ScrollHandDrag)
+            self.unsetCursor()
+        self._scale_line_item.hide()
+        self._scale_line_start = None
+        self._scale_line_end = None
+
+    def _on_scale_line_finished(self, pixel_distance: float):
+        dlg = ScaleDialog(pixel_distance, self)
+        if dlg.exec() == QDialog.Accepted:
+            vals = dlg.get_values()
+            if vals:
+                known, unit = vals
+                # Callback to MainWindow would be better but let's see how MainWindow handles calibration
+                # Actually, MainWindow should be notified. Let's add a signal or callback.
+                if hasattr(self, "on_scale_set") and self.on_scale_set:
+                    self.on_scale_set(pixel_distance, known, unit)
+        self.btn_scale.setChecked(False)
+        self.set_scale_line_mode(False)
 
     def _update_overlay_pos(self):
         # Position at top right with some margin
@@ -841,6 +928,18 @@ class ImageViewer(QGraphicsView):
         self._update_vertex_items()
 
     def mousePressEvent(self, event: QMouseEvent):
+        if self._scale_line_mode and self._has_image:
+            if event.button() == Qt.LeftButton:
+                mouse = event.position().toPoint()
+                self._scale_line_start = self._clamp_to_image(self.mapToScene(mouse))
+                self._scale_line_end = self._scale_line_start
+                self._scale_line_item.setLine(
+                    QLineF(self._scale_line_start, self._scale_line_end)
+                )
+                self._scale_line_item.show()
+                event.accept()
+                return
+
         if self._roi_mode and self._has_image:
             mouse = event.position().toPoint()
             scene_p = self._clamp_to_image(self.mapToScene(mouse))
@@ -946,6 +1045,15 @@ class ImageViewer(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
+        if self._scale_line_mode and self._has_image and self._scale_line_start:
+            mouse = event.position().toPoint()
+            self._scale_line_end = self._clamp_to_image(self.mapToScene(mouse))
+            self._scale_line_item.setLine(
+                QLineF(self._scale_line_start, self._scale_line_end)
+            )
+            event.accept()
+            return
+
         if self._roi_mode and self._has_image:
             mouse = event.position().toPoint()
             scene_p = self._clamp_to_image(self.mapToScene(mouse))
@@ -988,6 +1096,17 @@ class ImageViewer(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
+        if self._scale_line_mode and event.button() == Qt.LeftButton:
+            if self._scale_line_start and self._scale_line_end:
+                dist = QLineF(self._scale_line_start, self._scale_line_end).length()
+                if dist > 0.5:
+                    self._on_scale_line_finished(dist)
+            self._scale_line_start = None
+            self._scale_line_end = None
+            self._scale_line_item.hide()
+            event.accept()
+            return
+
         if self._roi_mode and event.button() == Qt.LeftButton:
             if self._drag_move_roi:
                 self._drag_move_roi = False
