@@ -662,6 +662,7 @@ class MainWindow(QMainWindow):
             return
 
         self.status.setText(f"Loading {os.path.basename(path)}...")
+        self.viewer.loading_overlay.show()
 
         worker = TiffLoaderWorker(path)
         worker.signals.finished.connect(self._on_tiff_loaded)
@@ -710,6 +711,7 @@ class MainWindow(QMainWindow):
         self._update_slice_info(path)
 
     def _on_tiff_load_error(self, path: str, error_msg: str):
+        self.viewer.loading_overlay.hide()
         self.status.setText(f"Failed to load {os.path.basename(path)}: {error_msg}")
 
     def _update_slice_info(self, path: str):

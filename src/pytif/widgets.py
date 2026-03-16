@@ -2,7 +2,7 @@ import copy
 import math
 from typing import Any, Callable, Dict, List, Optional
 
-from PySide6.QtCore import QEvent, QLineF, QPointF, QRectF, Qt
+from PySide6.QtCore import QEvent, QLineF, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -160,6 +160,56 @@ class ROIListWindow(QWidget):
             self.on_closed()
 
 
+class LoadingOverlay(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.angle = 0
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._rotate)
+        # We don't start the timer until the overlay is shown
+        self.hide()
+
+    def _rotate(self):
+        self.angle = (self.angle + 10) % 360  # rotation speed
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Draw semi-transparent background
+        painter.fillRect(self.rect(), QColor(30, 30, 30, 160))
+
+        # Setup for spinner
+        side = min(self.width(), self.height())
+        radius = side / 20
+        center = self.rect().center()
+
+        painter.translate(center)
+        painter.rotate(self.angle)
+
+        pen = QPen(QColor(255, 255, 255))
+        pen.setWidth(max(3, int(radius / 3)))
+        pen.setCapStyle(Qt.RoundCap)
+
+        # Draw 8 circles or lines around a center
+        for i in range(8):
+            opacity = int(255 * (i + 1) / 8)
+            pen.setColor(QColor(255, 255, 255, opacity))
+            painter.setPen(pen)
+            painter.drawLine(0, int(radius), 0, int(radius * 1.8))
+            painter.rotate(45)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.timer.start(30)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.timer.stop()
+
+
 class ImageViewer(QGraphicsView):
     ROI_NONE = ROI_NONE
     ROI_POLYGON = ROI_POLYGON
@@ -187,6 +237,9 @@ class ImageViewer(QGraphicsView):
 
         # UI Overlay
         self._setup_ui_overlay()
+
+        self.loading_overlay = LoadingOverlay(self)
+        self.loading_overlay.hide()
 
         # ROI state
         self._roi_mode = False
@@ -318,9 +371,11 @@ class ImageViewer(QGraphicsView):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_overlay_pos()
+        self.loading_overlay.resize(self.size())
         self.viewport().update()
 
     def set_image(self, pixmap: QPixmap, fit: bool = True):
+        self.loading_overlay.hide()
         self._pix_item.setPixmap(pixmap)
         self._scene.setSceneRect(pixmap.rect())
         self._has_image = not pixmap.isNull()
