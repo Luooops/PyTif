@@ -119,3 +119,28 @@ def load_rois_from_json(path: str) -> List[Dict[str, Any]]:
                 }
             )
     return rois
+
+
+def save_tiff_with_metadata(
+    path: str,
+    data: np.ndarray,
+    units_per_pixel: float,
+    unit_label: str,
+    description: Optional[str] = None,
+):
+    """
+    Saves image data to a TIFF file with resolution and unit metadata.
+    """
+    # resolution is pixels per unit
+    res = 1.0 / units_per_pixel
+    tifffile.imwrite(
+        path,
+        data,
+        resolution=(res, res),
+        metadata=(
+            {"unit": unit_label, "description": description}
+            if description
+            else {"unit": unit_label}
+        ),
+        photometric="minisblack",
+    )

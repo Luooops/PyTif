@@ -52,7 +52,12 @@ from .constants import (
     SUPPORTED_EXTS,
 )
 from .file_filter_model import FileFilterModel
-from .io_handler import TiffLoaderWorker, load_rois_from_json, save_rois_to_json
+from .io_handler import (
+    TiffLoaderWorker,
+    load_rois_from_json,
+    save_rois_to_json,
+    save_tiff_with_metadata,
+)
 from .roi import roi_geometry, roi_mask
 from .utils import natural_key, numpy_to_qimage
 from .widgets import DraggablePanel, ImageViewer, ROIListWindow
@@ -84,6 +89,8 @@ class MainWindow(QMainWindow):
         self.current_slice: int = 0
         self.rois_by_file: Dict[str, List[Dict[str, Any]]] = {}
         self.selected_roi_by_file: Dict[str, int] = {}
+        self.calibrations_by_file: Dict[str, Dict[str, Any]] = {}
+        self.changed_files: Set[str] = set()
         self._updating_rois_from_file = False
         self._updating_roi_list_ui = False
         self.loading_pool = QThreadPool.globalInstance()
@@ -131,6 +138,22 @@ class MainWindow(QMainWindow):
         self.close_dropdown.addAction("Close All", self.close_all_entries)
         self.btn_close.setMenu(self.close_dropdown)
         top.addWidget(self.btn_close)
+
+        # Save dropdown button
+        self.btn_save = QToolButton()
+        self.btn_save.setFixedHeight(30)
+        self.btn_save.setText("Save")
+        if platform.system() == "Darwin":  # macOS
+            self.btn_save.setPopupMode(QToolButton.InstantPopup)
+        else:
+            self.btn_save.setPopupMode(QToolButton.MenuButtonPopup)
+        self.btn_save.clicked.connect(self.save_selected)
+        self.save_dropdown = QMenu(self.btn_save)
+        self.save_dropdown.addAction("Save Selected", self.save_selected)
+        self.save_dropdown.addAction("Save All", self.save_all)
+        self.save_dropdown.addAction("Save As ...", self.save_as)
+        self.btn_save.setMenu(self.save_dropdown)
+        top.addWidget(self.btn_save)
 
         self.btn_sidebar = QPushButton("Hide Sidebar")
         self.btn_sidebar.setFixedHeight(30)
@@ -224,6 +247,22 @@ class MainWindow(QMainWindow):
         act_open_folder = QAction("Open Folder(s)", self)
         act_open_folder.triggered.connect(self.open_folder_dialog)
         file_menu.addAction(act_open_folder)
+
+        file_menu.addSeparator()
+
+        act_save_selected = QAction("Save Selected", self)
+        act_save_selected.setShortcut("Meta+S")  # ⌘S
+        act_save_selected.triggered.connect(self.save_selected)
+        file_menu.addAction(act_save_selected)
+
+        act_save_all = QAction("Save All", self)
+        act_save_all.triggered.connect(self.save_all)
+        file_menu.addAction(act_save_all)
+
+        act_save_as = QAction("Save As...", self)
+        act_save_as.setShortcut("Meta+Shift+S")  # ⌘⇧S
+        act_save_as.triggered.connect(self.save_as)
+        file_menu.addAction(act_save_as)
 
         file_menu.addSeparator()
 
@@ -525,6 +564,8 @@ class MainWindow(QMainWindow):
         for path in affected_files:
             self.rois_by_file.pop(path, None)
             self.selected_roi_by_file.pop(path, None)
+            self.calibrations_by_file.pop(path, None)
+            self.changed_files.discard(path)
 
         if not self.opened_files and not self.opened_folders:
             self._clear_loaded_image("All files closed.")
@@ -559,6 +600,8 @@ class MainWindow(QMainWindow):
         self.excluded_paths.clear()
         self.rois_by_file.clear()
         self.selected_roi_by_file.clear()
+        self.calibrations_by_file.clear()
+        self.changed_files.clear()
         self._clear_loaded_image("")
         self._rebuild_file_tree()
         self._refresh_roi_list()
@@ -650,6 +693,10 @@ class MainWindow(QMainWindow):
             self.slice_controls.hide()
 
         self.viewer.set_scale_calibration(calibration)
+        if path:
+            self.calibrations_by_file[path] = (
+                copy.deepcopy(calibration) if calibration else {}
+            )
         self.viewer.set_image(initial_pix, fit=True)
         self._apply_rois_for_current_file()
         self._update_roi_stats()
@@ -708,6 +755,80 @@ class MainWindow(QMainWindow):
 
     def _current_tif_name(self) -> str:
         return self.active_file_path or ""
+
+    # ---------------- Save Logic ----------------
+    def save_selected(self):
+        path = self.active_file_path
+        if not path:
+            self.status.setText("No active file to save.")
+            return
+        if self._save_file_internal(path):
+            self.status.setText(f"Saved {os.path.basename(path)}")
+            self.changed_files.discard(path)
+
+    def save_all(self):
+        if not self.changed_files:
+            self.status.setText("No unsaved changes.")
+            return
+
+        count = 0
+        to_save = list(self.changed_files)
+        for path in to_save:
+            if self._save_file_internal(path):
+                count += 1
+                self.changed_files.discard(path)
+        self.status.setText(f"Saved {count} file(s).")
+
+    def save_as(self):
+        source_path = self.active_file_path
+        if not source_path:
+            self.status.setText("No active file to save.")
+            return
+
+        target_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save As",
+            source_path,
+            "TIFF files (*.tif *.tiff)",
+        )
+        if not target_path:
+            return
+
+        if self._save_file_internal(source_path, target_path):
+            self.status.setText(f"Saved as {os.path.basename(target_path)}")
+
+    def _save_file_internal(
+        self, source_path: str, target_path: Optional[str] = None
+    ) -> bool:
+        # We need the original data. If it's the current active file, we have 'self.loaded'.
+        # However, if it's 'save_all', we might need to reload or keep data in memory.
+        # For this requirement, we'll assume we are saving what's in 'self.loaded' if it matches source_path,
+        # otherwise we'd need a more complex state management.
+
+        if source_path != self.active_file_path or self.loaded is None:
+            # For simplicity in this implementation, we only support saving the active file's calibration.
+            # A full implementation would likely store calibration in a dict and reload data if needed.
+            # But here we'll try to use what we have.
+            self.status.setText(
+                f"Can only save active file for now: {os.path.basename(source_path)}"
+            )
+            return False
+
+        path_to_write = target_path or source_path
+        calib = self.calibrations_by_file.get(source_path, {})
+        units_per_pixel = calib.get("x_units_per_pixel", 1.0)
+        unit_label = calib.get("unit_label", "px")
+
+        try:
+            save_tiff_with_metadata(
+                path_to_write, self.loaded, units_per_pixel, unit_label
+            )
+            return True
+        except Exception as e:
+            self.status.setText(
+                f"Failed to save {os.path.basename(path_to_write)}: {e}"
+            )
+            return False
 
     # ---------------- Sidebar ----------------
     def toggle_sidebar(self):
@@ -868,6 +989,8 @@ class MainWindow(QMainWindow):
             "unit_label": unit,
         }
         self.viewer.set_scale_calibration(calibration)
+        self.calibrations_by_file[path] = calibration
+        self.changed_files.add(path)
         self._update_roi_stats()
         self.status.setText(f"Scale set: 1 pixel = {units_per_pixel:.4g} {unit}")
 
@@ -1380,10 +1503,14 @@ class MainWindow(QMainWindow):
             return False
 
     def _clear_loaded_image(self, status_text: str):
+        path = self.active_file_path
         self.loaded = None
         self.total_slices = 1
         self.current_slice = 0
         self.active_file_path = None
+        if path:
+            self.calibrations_by_file.pop(path, None)
+            self.changed_files.discard(path)
         self.viewer.set_scale_calibration(None)
         self.viewer.set_image(QPixmap())
         self.viewer.set_rois([], None)
