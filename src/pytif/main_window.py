@@ -697,10 +697,14 @@ class MainWindow(QMainWindow):
         else:
             self.slice_controls.hide()
 
-        self.viewer.set_scale_calibration(calibration)
+        # Prefer manually set calibration from current session if it exists
+        cached_calib = self.calibrations_by_file.get(path) if path else None
+        final_calib = cached_calib if cached_calib is not None else calibration
+
+        self.viewer.set_scale_calibration(final_calib)
         if path:
             self.calibrations_by_file[path] = (
-                copy.deepcopy(calibration) if calibration else {}
+                copy.deepcopy(final_calib) if final_calib else {}
             )
         self.viewer.set_image(initial_pix, fit=True)
         self._apply_rois_for_current_file()
