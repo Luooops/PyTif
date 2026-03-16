@@ -137,6 +137,8 @@ def save_tiff_with_metadata(
         path,
         data,
         resolution=(res, res),
+        resolutionunit=1,
+        imagej=True,
         metadata=(
             {"unit": unit_label, "description": description}
             if description
