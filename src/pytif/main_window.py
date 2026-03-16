@@ -236,11 +236,14 @@ class MainWindow(QMainWindow):
         self.slice_spin.valueChanged.connect(self.on_spin_changed)
 
     def _build_menu(self):
-        # macOS standard menu
+        # Platform-specific shortcuts
+        is_mac = platform.system() == "Darwin"
+        mod = "Meta" if is_mac else "Ctrl"
+
         file_menu = self.menuBar().addMenu("File")
 
         act_open_file = QAction("Open File(s)", self)
-        act_open_file.setShortcut("Meta+O")  # ⌘O
+        act_open_file.setShortcut(f"{mod}+O")
         act_open_file.triggered.connect(self.open_file_dialog)
         file_menu.addAction(act_open_file)
 
@@ -251,7 +254,7 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
 
         act_save_selected = QAction("Save Selected", self)
-        act_save_selected.setShortcut("Meta+S")  # ⌘S
+        act_save_selected.setShortcut(f"{mod}+S")
         act_save_selected.triggered.connect(self.save_selected)
         file_menu.addAction(act_save_selected)
 
@@ -260,7 +263,8 @@ class MainWindow(QMainWindow):
         file_menu.addAction(act_save_all)
 
         act_save_as = QAction("Save As...", self)
-        act_save_as.setShortcut("Meta+Shift+S")  # ⌘⇧S
+        # Shift modifier is standard across platforms for "Save As"
+        act_save_as.setShortcut(f"{mod}+Shift+S")
         act_save_as.triggered.connect(self.save_as)
         file_menu.addAction(act_save_as)
 
@@ -273,7 +277,7 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
 
         act_close = QAction("Close Window", self)
-        act_close.setShortcut("Meta+W")  # ⌘W
+        act_close.setShortcut(f"{mod}+W")
         act_close.triggered.connect(self.close)
         file_menu.addAction(act_close)
 
