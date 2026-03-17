@@ -85,7 +85,7 @@ class MainWindow(QMainWindow):
         self.active_file_path: Optional[str] = None
 
         # Image state
-        self.auto_contrast = True
+        self.auto_contrast = False
         self.loaded: Optional[np.ndarray] = None  # (H,W) or (S,H,W)
         self.total_slices: int = 1
         self.current_slice: int = 0
