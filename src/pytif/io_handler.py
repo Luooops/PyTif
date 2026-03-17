@@ -39,9 +39,10 @@ class TiffLoaderSignals(QObject):
 
 
 class TiffLoaderWorker(QRunnable):
-    def __init__(self, path: str):
+    def __init__(self, path: str, auto_contrast: bool = False):
         super().__init__()
         self.path = path
+        self.auto_contrast = auto_contrast
         self.signals = TiffLoaderSignals()
 
     def run(self):
@@ -54,7 +55,7 @@ class TiffLoaderWorker(QRunnable):
             else:
                 img = flat[0]
 
-            qimg = numpy_to_qimage(img)
+            qimg = numpy_to_qimage(img, auto_contrast=self.auto_contrast)
             pix = QPixmap.fromImage(qimg)
 
             self.signals.finished.emit(self.path, flat, slices, calibration, pix)
@@ -84,6 +85,27 @@ def save_rois_to_json(path: str, image_path: str, rois: List[Dict[str, Any]]) ->
         json.dump(payload, f, indent=2)
 
     return len(data_rois)
+
+
+class RenderSignals(QObject):
+    finished = Signal(QPixmap, bool)  # pixmap, fit
+
+
+class RenderWorker(QRunnable):
+    def __init__(self, img: np.ndarray, auto_contrast: bool, fit: bool = False):
+        super().__init__()
+        self.img = img
+        self.auto_contrast = auto_contrast
+        self.fit = fit
+        self.signals = RenderSignals()
+
+    def run(self):
+        try:
+            qimg = numpy_to_qimage(self.img, auto_contrast=self.auto_contrast)
+            pix = QPixmap.fromImage(qimg)
+            self.signals.finished.emit(pix, self.fit)
+        except Exception:
+            pass
 
 
 def load_rois_from_json(path: str) -> List[Dict[str, Any]]:

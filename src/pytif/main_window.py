@@ -53,6 +53,7 @@ from .constants import (
 )
 from .file_filter_model import FileFilterModel
 from .io_handler import (
+    RenderWorker,
     TiffLoaderWorker,
     load_rois_from_json,
     save_rois_to_json,
@@ -84,6 +85,7 @@ class MainWindow(QMainWindow):
         self.active_file_path: Optional[str] = None
 
         # Image state
+        self.auto_contrast = True
         self.loaded: Optional[np.ndarray] = None  # (H,W) or (S,H,W)
         self.total_slices: int = 1
         self.current_slice: int = 0
@@ -280,6 +282,14 @@ class MainWindow(QMainWindow):
         act_close.setShortcut(f"{mod}+W")
         act_close.triggered.connect(self.close)
         file_menu.addAction(act_close)
+
+        # Contrast menu
+        contrast_menu = self.menuBar().addMenu("Contrast")
+        self.act_auto_contrast = QAction("Auto Contrast", self)
+        self.act_auto_contrast.setCheckable(True)
+        self.act_auto_contrast.setChecked(self.auto_contrast)
+        self.act_auto_contrast.triggered.connect(self._toggle_auto_contrast)
+        contrast_menu.addAction(self.act_auto_contrast)
 
         # Preferences menu
         pref_menu = self.menuBar().addMenu("Preferences")
@@ -707,7 +717,7 @@ class MainWindow(QMainWindow):
         self.status.setText(f"Loading {os.path.basename(path)}...")
         self.viewer.loading_overlay.show()
 
-        worker = TiffLoaderWorker(path)
+        worker = TiffLoaderWorker(path, auto_contrast=self.auto_contrast)
         worker.signals.finished.connect(self._on_tiff_loaded)
         worker.signals.error.connect(self._on_tiff_load_error)
         self.loading_pool.start(worker)
@@ -783,9 +793,14 @@ class MainWindow(QMainWindow):
         else:
             img = self.loaded[self.current_slice]
 
-        qimg = numpy_to_qimage(img)
-        pix = QPixmap.fromImage(qimg)
+        self.viewer.loading_overlay.show()
+        worker = RenderWorker(img, self.auto_contrast, fit)
+        worker.signals.finished.connect(self._on_render_finished)
+        self.loading_pool.start(worker)
+
+    def _on_render_finished(self, pix: QPixmap, fit: bool):
         self.viewer.set_image(pix, fit=fit)
+        self.viewer.loading_overlay.hide()
 
     # ---------------- Slice ----------------
     def on_slice_changed(self, v: int):
@@ -898,6 +913,11 @@ class MainWindow(QMainWindow):
 
     def _zoom_out(self):
         self.viewer.zoom_out()
+
+    def _toggle_auto_contrast(self, checked: bool):
+        self.auto_contrast = checked
+        if self.loaded is not None:
+            self._render(fit=False)
 
     def _fit(self):
         self.viewer.fit_in_view()

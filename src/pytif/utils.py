@@ -43,14 +43,32 @@ def natural_key(s: str):
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", s)]
 
 
-def to_8bit_grayscale(img2d: np.ndarray) -> np.ndarray:
+def to_8bit_grayscale(img2d: np.ndarray, auto_contrast: bool = False) -> np.ndarray:
+    if not auto_contrast:
+        # If it's already 8-bit, return as is
+        if img2d.dtype == np.uint8:
+            return img2d
+        # If it's 16-bit, downscale to 8-bit by bit-shifting (preserving raw value ratios)
+        if img2d.dtype == np.uint16:
+            return (img2d >> 8).astype(np.uint8)
+        # For other types (float, etc.), we still need a fallback, but let's default to minmax
+        # though user asked for raw. For float, "raw" is ambiguous without a range.
+        # We'll use 0-1 range if it's float, otherwise minmax as a safe fallback.
+        if np.issubdtype(img2d.dtype, np.floating):
+            return (np.clip(img2d, 0, 1) * 255).astype(np.uint8)
+
     x = img2d.astype(np.float32, copy=False)
     finite = np.isfinite(x)
     if not np.any(finite):
         return np.zeros_like(x, dtype=np.uint8)
 
-    vmin = np.percentile(x[finite], 1)
-    vmax = np.percentile(x[finite], 99)
+    if auto_contrast:
+        vmin = np.percentile(x[finite], 0.2)
+        vmax = np.percentile(x[finite], 99.8)
+    else:
+        vmin = np.min(x[finite])
+        vmax = np.max(x[finite])
+
     if vmax <= vmin:
         vmax = vmin + 1
 
@@ -59,9 +77,9 @@ def to_8bit_grayscale(img2d: np.ndarray) -> np.ndarray:
     return (y * 255).astype(np.uint8)
 
 
-def numpy_to_qimage(img: np.ndarray) -> QImage:
+def numpy_to_qimage(img: np.ndarray, auto_contrast: bool = False) -> QImage:
     if img.ndim == 2:
-        u8 = to_8bit_grayscale(img)
+        u8 = to_8bit_grayscale(img, auto_contrast=auto_contrast)
         h, w = u8.shape
         return QImage(u8.data, w, h, w, QImage.Format_Grayscale8).copy()
     raise ValueError(f"Unsupported image shape: {img.shape}")
