@@ -638,9 +638,52 @@ class MainWindow(QMainWindow):
             return
 
         menu = QMenu()
+
+        # Filter selected paths to find valid image files
+        image_paths = [
+            p
+            for p in selected_paths
+            if os.path.isfile(p) and p.lower().endswith(SUPPORTED_EXTS)
+        ]
+
+        if image_paths and self.active_file_path:
+            current_calibration = self.calibrations_by_file.get(self.active_file_path)
+            if current_calibration:
+                apply_scale_action = menu.addAction(
+                    f"Apply Current Scale to ({len(image_paths)})"
+                )
+                apply_scale_action.triggered.connect(
+                    lambda: self.apply_current_scale_to_files(image_paths)
+                )
+
         close_action = menu.addAction(f"Close Selected ({len(selected_paths)})")
         close_action.triggered.connect(self.close_selected_entries)
         menu.exec(self.tree_view.viewport().mapToGlobal(pos))
+
+    def apply_current_scale_to_files(self, target_paths: List[str]):
+        if not self.active_file_path:
+            return
+
+        current_calibration = self.calibrations_by_file.get(self.active_file_path)
+        if not current_calibration:
+            self.status.setText("No scale set for the current image.")
+            return
+
+        count = 0
+        for path in target_paths:
+            # Skip if it's the current file (already has the scale)
+            if path == self.active_file_path:
+                continue
+
+            # Apply the calibration
+            self.calibrations_by_file[path] = copy.deepcopy(current_calibration)
+            self.changed_files.add(path)
+            count += 1
+
+        if count > 0:
+            self.status.setText(f"Applied current scale to {count} file(s).")
+        else:
+            self.status.setText("No changes made.")
 
     def on_tree_current_changed(self, current: QModelIndex, previous: QModelIndex):
         pass
