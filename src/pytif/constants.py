@@ -34,7 +34,14 @@ CUSTOM_APP_STYLESHEET = f"""
     }}
     QMenu::item {{
         min-width: 180px;
-        padding: 4px 20px;
+        padding: 4px 28px 4px 12px;
+    }}
+    QMenu::indicator {{
+        subcontrol-origin: padding;
+        subcontrol-position: center right;
+        right: 8px;
+        width: 16px;
+        height: 16px;
     }}
     QPushButton, QToolButton, QComboBox, QSpinBox, QDoubleSpinBox {{
         border: 1px solid {CONTROL_BORDER_COLOR};
