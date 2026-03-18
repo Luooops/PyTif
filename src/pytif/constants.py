@@ -30,16 +30,16 @@ CUSTOM_APP_STYLESHEET = f"""
         margin: 0px;
     }}
     QMenu {{
-        min-width: 200px;
+        min-width: 180px;
     }}
     QMenu::item {{
-        min-width: 180px;
+        min-width: 160px;
         padding: 4px 28px 4px 12px;
     }}
     QMenu::indicator {{
         subcontrol-origin: padding;
         subcontrol-position: center right;
-        right: 8px;
+        right: 16px;
         width: 16px;
         height: 16px;
     }}

@@ -92,6 +92,8 @@ class MainWindow(QMainWindow):
         self.rois_by_file: Dict[str, List[Dict[str, Any]]] = {}
         self.selected_roi_by_file: Dict[str, int] = {}
         self.calibrations_by_file: Dict[str, Dict[str, Any]] = {}
+        self.undo_stack_by_file: Dict[str, List[Dict[str, Any]]] = {}
+        self.redo_stack_by_file: Dict[str, List[Dict[str, Any]]] = {}
         self.changed_files: Set[str] = set()
         self._updating_rois_from_file = False
         self._updating_roi_list_ui = False
@@ -282,6 +284,18 @@ class MainWindow(QMainWindow):
         act_close.setShortcut(f"{mod}+W")
         act_close.triggered.connect(self.close)
         file_menu.addAction(act_close)
+
+        # Edit menu for Undo/Redo
+        edit_menu = self.menuBar().addMenu("Edit")
+        act_undo = QAction("Undo", self)
+        act_undo.setShortcut(f"{mod}+Z")
+        act_undo.triggered.connect(self._undo)
+        edit_menu.addAction(act_undo)
+
+        act_redo = QAction("Redo", self)
+        act_redo.setShortcut(f"{mod}+Y")
+        act_redo.triggered.connect(self._redo)
+        edit_menu.addAction(act_redo)
 
         # Contrast menu
         contrast_menu = self.menuBar().addMenu("Contrast")
@@ -1014,6 +1028,77 @@ class MainWindow(QMainWindow):
             f"ROI mode: {labels.get(roi_type, '')}. Press Esc to delete selected ROI."
         )
 
+    def _push_undo_state(self, action_name: str, clear_redo: bool = True):
+        path = self._current_file_path()
+        if not path:
+            return
+
+        state = {
+            "action": action_name,
+            "rois": copy.deepcopy(self.rois_by_file.get(path, [])),
+            "selected_roi": self.selected_roi_by_file.get(path),
+            "calibration": copy.deepcopy(self.calibrations_by_file.get(path, {})),
+        }
+
+        if path not in self.undo_stack_by_file:
+            self.undo_stack_by_file[path] = []
+
+        self.undo_stack_by_file[path].append(state)
+        # Limit undo stack size
+        if len(self.undo_stack_by_file[path]) > 50:
+            self.undo_stack_by_file[path].pop(0)
+
+        if clear_redo and path in self.redo_stack_by_file:
+            self.redo_stack_by_file[path].clear()
+
+    def _undo(self):
+        path = self._current_file_path()
+        if not path or not self.undo_stack_by_file.get(path):
+            self.status.setText("Nothing to undo.")
+            return
+
+        # Prepare redo state from current before applying undo
+        redo_state = {
+            "action": self.undo_stack_by_file[path][-1]["action"],
+            "rois": copy.deepcopy(self.rois_by_file.get(path, [])),
+            "selected_roi": self.selected_roi_by_file.get(path),
+            "calibration": copy.deepcopy(self.calibrations_by_file.get(path, {})),
+        }
+        if path not in self.redo_stack_by_file:
+            self.redo_stack_by_file[path] = []
+        self.redo_stack_by_file[path].append(redo_state)
+
+        state = self.undo_stack_by_file[path].pop()
+
+        self.rois_by_file[path] = state["rois"]
+        self.selected_roi_by_file[path] = state["selected_roi"]
+        self.calibrations_by_file[path] = state["calibration"]
+
+        self.viewer.set_scale_calibration(self.calibrations_by_file[path])
+        self._apply_rois_for_current_file()
+        self._update_roi_stats()
+        self.status.setText(f"Undo successful: {state['action']}")
+
+    def _redo(self):
+        path = self._current_file_path()
+        if not path or not self.redo_stack_by_file.get(path):
+            self.status.setText("Nothing to redo.")
+            return
+
+        state = self.redo_stack_by_file[path].pop()
+
+        # Push current state to undo stack before redoing, but DON'T clear redo stack
+        self._push_undo_state(state["action"], clear_redo=False)
+
+        self.rois_by_file[path] = state["rois"]
+        self.selected_roi_by_file[path] = state["selected_roi"]
+        self.calibrations_by_file[path] = state["calibration"]
+
+        self.viewer.set_scale_calibration(self.calibrations_by_file[path])
+        self._apply_rois_for_current_file()
+        self._update_roi_stats()
+        self.status.setText(f"Redo successful: {state['action']}")
+
     def _current_file_path(self) -> Optional[str]:
         return self.active_file_path
 
@@ -1025,6 +1110,20 @@ class MainWindow(QMainWindow):
         path = self._current_file_path()
         if not path:
             return
+
+        # Determine if we should push to undo stack
+        # We push if ROI count changed or if a ROI was moved (rois content changed)
+        # Note: selected_idx changes usually don't need undo, but they are part of the state.
+        old_rois = self.rois_by_file.get(path, [])
+        if rois != old_rois:
+            action = "Modify ROI"
+            if len(rois) > len(old_rois):
+                action = "Add ROI"
+            elif len(rois) < len(old_rois):
+                action = "Remove ROI"
+
+            self._push_undo_state(action)
+
         self._ensure_roi_ids_and_names(path, rois)
         self.rois_by_file[path] = copy.deepcopy(rois)
         if selected_idx is None:
@@ -1055,6 +1154,8 @@ class MainWindow(QMainWindow):
         if not path:
             return
 
+        self._push_undo_state("Set Scale")
+
         units_per_pixel = known_dist / pixel_dist
         calibration = {
             "x_units_per_pixel": units_per_pixel,
@@ -1084,6 +1185,10 @@ class MainWindow(QMainWindow):
         path = self._current_file_path()
         if not path:
             return
+
+        if self.rois_by_file.get(path):
+            self._push_undo_state("Clear ROIs")
+
         self.rois_by_file[path] = []
         self.selected_roi_by_file.pop(path, None)
         self._apply_rois_for_current_file()
@@ -1327,6 +1432,24 @@ class MainWindow(QMainWindow):
     # ---------------- Keyboard ----------------
     def keyPressEvent(self, event: QKeyEvent):
         key = event.key()
+        mod = event.modifiers()
+
+        # Handle Undo/Redo shortcuts
+        is_mac = platform.system() == "Darwin"
+        accel_mod = Qt.MetaModifier if is_mac else Qt.ControlModifier
+
+        if mod & accel_mod:
+            if key == Qt.Key_Z:
+                if mod & Qt.ShiftModifier:
+                    self._redo()
+                else:
+                    self._undo()
+                event.accept()
+                return
+            if not is_mac and key == Qt.Key_Y:
+                self._redo()
+                event.accept()
+                return
 
         if self.viewer.btn_roi.isChecked():
             if key == Qt.Key_Left and self.viewer.nudge_selected_roi(-1, 0):
