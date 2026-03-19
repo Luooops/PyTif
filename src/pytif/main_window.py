@@ -155,7 +155,7 @@ class MainWindow(QMainWindow):
             self.btn_close.setPopupMode(QToolButton.MenuButtonPopup)
         self.btn_close.clicked.connect(self.close_current_entry)
         self.close_dropdown = QMenu(self.btn_close)
-        self.close_dropdown.addAction("Close Selected", self.close_current_entry)
+        self.close_dropdown.addAction("Close Current File", self.close_current_entry)
         self.close_dropdown.addAction("Close All", self.close_all_entries)
         self.btn_close.setMenu(self.close_dropdown)
         top.addWidget(self.btn_close)
