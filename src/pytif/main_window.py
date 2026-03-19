@@ -6,7 +6,16 @@ from typing import Any, Dict, List, Optional, Set
 
 import numpy as np
 import qdarktheme
-from PySide6.QtCore import QDir, QModelIndex, QPointF, QSettings, QSize, Qt, QThreadPool
+from PySide6.QtCore import (
+    QDir,
+    QModelIndex,
+    QPointF,
+    QSettings,
+    QSize,
+    Qt,
+    QThreadPool,
+    QTimer,
+)
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -99,8 +108,16 @@ class MainWindow(QMainWindow):
         self._updating_roi_list_ui = False
         self.loading_pool = QThreadPool.globalInstance()
 
+        self.loading_timer = QTimer(self)
+        self.loading_timer.setSingleShot(True)
+        self.loading_timer.setInterval(1000)
+        self.loading_timer.timeout.connect(self._show_loading_overlay)
+
         self._build_ui()
         self._build_menu()
+
+    def _show_loading_overlay(self):
+        self.viewer.loading_overlay.show()
 
     # ---------------- UI ----------------
     def _build_ui(self):
@@ -729,7 +746,7 @@ class MainWindow(QMainWindow):
             return
 
         self.status.setText(f"Loading {os.path.basename(path)}...")
-        self.viewer.loading_overlay.show()
+        self.loading_timer.start()
 
         worker = TiffLoaderWorker(path, auto_contrast=self.auto_contrast)
         worker.signals.finished.connect(self._on_tiff_loaded)
@@ -744,6 +761,8 @@ class MainWindow(QMainWindow):
         calibration: Any,
         initial_pix: QPixmap,
     ):
+        self.loading_timer.stop()
+        self.viewer.loading_overlay.hide()
         self.loaded = flat
         self.total_slices = slices
         self.current_slice = 0
@@ -782,6 +801,7 @@ class MainWindow(QMainWindow):
         self._update_slice_info(path)
 
     def _on_tiff_load_error(self, path: str, error_msg: str):
+        self.loading_timer.stop()
         self.viewer.loading_overlay.hide()
         self.status.setText(f"Failed to load {os.path.basename(path)}: {error_msg}")
 
@@ -807,12 +827,13 @@ class MainWindow(QMainWindow):
         else:
             img = self.loaded[self.current_slice]
 
-        self.viewer.loading_overlay.show()
+        self.loading_timer.start()
         worker = RenderWorker(img, self.auto_contrast, fit)
         worker.signals.finished.connect(self._on_render_finished)
         self.loading_pool.start(worker)
 
     def _on_render_finished(self, pix: QPixmap, fit: bool):
+        self.loading_timer.stop()
         self.viewer.set_image(pix, fit=fit)
         self.viewer.loading_overlay.hide()
 
